@@ -1,37 +1,156 @@
 # niri · Noctalia rice
 
-A Wayland desktop rice on CachyOS: **[niri](https://github.com/YaLTeR/niri)**
-scrollable-tiling compositor + **[Noctalia v5](https://github.com/noctalia-dev/noctalia)**
-shell, wired together with a wallpaper-driven colour pipeline. One palette,
-extracted from the image on screen, pushed into the compositor, the bar, the
-terminals, the launcher and the editor.
+A Wayland desktop rice: **[niri](https://github.com/YaLTeR/niri)** scrollable-tiling
+compositor plus **[Noctalia v5](https://github.com/noctalia-dev/noctalia)** as the
+shell, tied together by a wallpaper-driven Material 3 palette. The image on screen
+is the only colour source — its palette is pushed into the compositor's focus ring,
+the bar, the terminals, the editor and the browser.
 
-Verified on: `niri 26.04` · `noctalia v5.3.0` · `matugen 4.2.0` ·
-`awww 0.12.1` · `tuigreet 0.11.0` · `plugin_api 30`
-
-Clean-install tested: fresh Arch VM, `./install.sh` from an empty `$HOME`,
-shim compiled, niri + Noctalia started, wallpaper palette propagated to the bar
-and the niri focus ring.
-
-> **Screenshot:** drop one in as `screenshots/desktop.png` and embed it here.
-> This repo intentionally ships without a capture — one taken from a working
-> session leaks window titles, open documents and terminal history.
+Verified on Arch Linux: `niri 26.04` · `noctalia 5.3.0` · `matugen 4.2.0` ·
+`awww 0.12.1` · `tuigreet 0.11.0`.
 
 ---
 
-## Stack
+## Requirements
+
+- Arch Linux (or a derivative with the same package names), x86_64
+- a normal user with `sudo` — the installer runs as you, never as root
+- working network access
+
+That is the whole list. Packages, the AUR build, the fonts, the cursor theme, the
+editor plugins and the `LD_PRELOAD` shim are all installed for you.
+
+---
+
+## Install
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/bookenjoyer67/rice/main/bootstrap.sh | bash
+```
+
+Run it as your user on a fresh Arch install. It:
+
+1. installs `git` if the machine has none
+2. clones this repo to `~/dotfiles`
+3. runs `install.sh`, which installs every package in `packages.txt` (official
+   repos) and `aur-packages.txt` (`brave-origin-bin`, via paru/yay or makepkg),
+   mirrors each package into `$HOME`, syncs the Neovim plugins, renders the
+   fastfetch and starship configs, writes the Noctalia state, extracts the cursor
+   theme, enables the session units and compiles `noctalia-layer-swap.so`
+4. writes `/etc/greetd/config.toml` and `/etc/tuigreet/config.toml` and enables
+   `greetd`, so the next boot lands on the login screen and logging in starts
+   `niri-session`
+
+Anything the installer would overwrite is first moved to `<name>.bak-<timestamp>`.
+It never deletes a file of yours.
+
+### Flags
+
+| Command | Effect |
+|---|---|
+| `… \| bash` | full install, including the system greeter |
+| `… \| bash -s -- --dry-run` | print every action, change nothing |
+| `… \| bash -s -- --reboot` | reboot into the greeter when it finishes |
+| `… \| bash -s -- --no-system` | skip `/etc/greetd`, `/etc/tuigreet` and enabling greetd |
+| `… \| bash -s -- --no-deps` | link configs only, install no packages |
+| `… \| bash -s -- --no-shim` | skip compiling the layer-swap shim |
+
+`DOTFILES_DIR` overrides the checkout path, `RICE_REPO_URL` / `RICE_BRANCH` the
+remote. With any argument present the system stage is skipped on purpose, so a
+partial run never half-configures a greeter. Rerunning is safe: the checkout is
+fast-forwarded and every install step is idempotent.
+
+### After the first reboot
+
+Log in at the greeter — niri starts with the bar, wallpaper and palette already
+applied. Then finish two one-time steps:
+
+1. launch Brave Origin once, so its profile exists
+2. log out to a TTY, run `~/dotfiles/install.sh`, log back in
+
+The first registers the generated browser theme. The second writes the Noctalia
+state file, which Noctalia rewrites from memory while it runs — the installer
+skips it under a live session rather than losing the write.
+
+---
+
+## Install by hand
+
+```bash
+sudo pacman -S --needed git
+git clone https://github.com/bookenjoyer67/rice.git ~/dotfiles
+cd ~/dotfiles
+
+./install.sh --dry-run            # what would be linked
+./install.sh                      # packages, configs, Noctalia state, shim
+sudo ./install.sh --with-system   # /etc/greetd + /etc/tuigreet (run with HOME kept)
+sudo systemctl enable greetd
+```
+
+`install.sh` mirrors every top-level package directory onto `$HOME` — the GNU-stow
+convention, done explicitly so stow is not a dependency. Shared directories
+(`~/.config`, `~/.local/bin`, `~/.local/src`, `~/.config/systemd/user`) are
+recursed into, so two packages can never clobber each other.
+
+For the system stage keep `HOME` intact (`sudo env HOME="$HOME" ./install.sh
+--with-system`), otherwise `sudo` rewrites `HOME` to `/root` and the mirroring
+pass lands in the wrong place.
+
+Reload in place with `niri msg action load-config-file`, or log out and back in.
+
+---
+
+## What ships
 
 | Component | Role |
 |---|---|
-| **niri** | Scrollable-tiling Wayland compositor. KDL config, hot-reloadable via IPC. |
-| **Noctalia v5** | Native shell: bar on every output, notifications (`org.freedesktop.Notifications`), SNI tray, launcher, control centre, wallpaper picker, OSD. |
-| **Noctalia plugins** | Bar widgets and desktop widgets written in Luau — see the table below. |
-| **matugen** | Material-3 palette extraction → rendered into app config files. |
-| **awww** | Wallpaper daemon, per-output, animated. |
-| **tuigreet + greetd** | Text-mode login that `exec`s `niri-session` on tty1. |
-| **kitty** | Daily-driver terminal; alacritty and ghostty ship as alternatives. |
-| **swaylock** | Lock screen; backdrop is pre-graded per output by `make_backdrop.py`. |
-| **`noctalia-layer-swap.so`** | Custom `LD_PRELOAD` shim (C, `layer-swap/`) that pins desktop widgets into the niri overview backdrop instead of letting them zoom with the workspace. |
+| **niri** | Scrollable-tiling Wayland compositor, KDL config, hot-reloadable over IPC |
+| **Noctalia v5** | Bar on every output, notifications, SNI tray, launcher, control centre, wallpaper picker, OSD |
+| **matugen** | Material 3 palette extraction, rendered into kitty, Neovim and the lock-screen palette |
+| **awww** | Per-output wallpaper daemon |
+| **tuigreet + greetd** | Text login that `exec`s `niri-session` on tty1 |
+| **kitty** | Daily-driver terminal, running fish; alacritty and ghostty ship as alternatives |
+| **swaylock** | Lock screen with a palette-matched backdrop |
+| **Noctalia plugins** | Seven Luau plugins — bar widgets, desktop widgets, wallpaper browser |
+| **`noctalia-layer-swap.so`** | `LD_PRELOAD` shim (C, `layer-swap/`) that pins desktop widgets to the niri overview backdrop |
+
+Also installed: Neovim + plugins, starship, fastfetch, tmux, cliphist, grim/slurp,
+wf-recorder, brightnessctl, wlsunset, xwayland-satellite, pipewire, the Caskaydia
+Cove and Meslo Nerd Fonts, and Brave Origin from the AUR.
+
+---
+
+## Layout
+
+Each top-level directory is a package mirroring onto `$HOME`.
+
+```
+niri/              .config/niri            config.kdl · animations/ · focus-ring.kdl · noctalia.kdl
+noctalia/          .config/noctalia        bar.toml · backdrop.toml · templates/ · scripts/
+noctalia-plugins/  .config/noctalia-v5-plugins   seven Luau plugins
+noctalia-state/    settings.toml template  plugin enablement, desktop widgets
+matugen/           .config/matugen         palette templates (kitty, nvim, lock)
+kitty/  alacritty/  ghostty/               terminal configs
+hypr/              .config/hypr            wallpaper, screenshot and recording helpers niri calls
+backgrounds/       .config/backgrounds     wallpapers
+tuigreet/          .config/tuigreet        login screen theme
+system/            greetd/config.toml      installed by --with-system
+layer-swap/        .local/src/noctalia-layer-swap   shim source, Makefile, protocol XML
+local-bin/         .local/bin              lock.sh · make_backdrop.py · calcurse · refresh scripts
+shell/             .zshrc .bashrc .profile .zshenv
+fastfetch/         rendered config.jsonc + logo + themes
+brave/             .config/brave-origin-flags.conf
+session/           .config/environment.d + systemd user units
+cursors/           Bibata-Rainbow-Modern.tar.zst, extracted to ~/.icons
+packages.txt  aur-packages.txt   what the installer installs
+bootstrap.sh                     the curl one-liner
+```
+
+`hypr/` is not a Hyprland config despite the name — it is the helper package niri
+spawns (`start-wallpaper-one.sh`, `wallpaper-hotplug.sh`, `record-screen.sh`, the
+CRT shaders), reached through `~/.config/hypr/`. `system/` is the only package that
+needs root. `i3/`, `polybar/`, `picom/`, `xresources/`, `screenlayout/` and
+`revclock/` are optional extras you can prune.
 
 ---
 
@@ -41,202 +160,27 @@ and the niri focus ring.
 
 | Plugin | Id | What it does |
 |---|---|---|
-| Wallpaper Browser | `computing/wallpaper-browser` | Browse wallhaven.cc thumbnails in a panel and apply one by hand. Bound to `Mod+Shift+B`. |
-| Wallpaper Bars | `computing/wallpaper-bars` | Spectrum bars that sample the wallpaper behind them and take its colours live. |
-| Theme Refresh | `computing/theme-refresh` | Bar button that re-syncs the shell + widget palette when colour extraction lags behind a wallpaper change. |
-| Desktop Essentials | `computing/desktop-essentials` | Desktop clock, one-line weather, DeepSeek peak/price countdown. |
-| Desktop Cat | `computing/desktop-cat` | Bongo Cat on the desktop: idles, blinks, sleeps, slaps its paws to the beat. |
-| Spotify Port | `computing/spotport` | Status for spotport — Spotify algorithmic playlists ported into YouTube Music. |
-| Catwalk | `nathan/catwalk` | Animated cat for the bar. Third-party, MIT, vendored in `noctalia-plugins/` — upstream: `natersalad/noctalia-catwalk`. |
-
-Older plugins declare `plugin_api` 14/26; they still load on v5.3.0 alongside
-`plugin_api 30` ones.
-
----
-
-## Layout
-
-Each top-level directory is a *package* mirroring onto `$HOME` — the GNU-stow
-convention, except `install.sh` does the linking explicitly so stow isn't needed.
-
-```
-niri/              .config/niri            config.kdl · animations/ · focus-ring.kdl · noctalia.kdl
-noctalia/          .config/noctalia        bar.toml · backdrop.toml · templates/ · scripts/
-noctalia-plugins/  .config/noctalia-v5-plugins   seven Luau plugins
-matugen/           .config/matugen         palette templates (kitty, nvim, waybar, lock)
-kitty/             .config/kitty           kitty.conf + matugen-rendered theme/bg includes
-alacritty/         .config/alacritty
-ghostty/           .config/ghostty
-hyprland/          .config/hypr            wallpaper + screenshot scripts (used by niri — see note)
-backgrounds/       .config/backgrounds     wallpapers
-tuigreet/          .config/tuigreet        login screen theme
-system/            greetd/config.toml      system file, installed with --with-system
-layer-swap/        .local/src/noctalia-layer-swap   C shim source + Makefile + protocol XML
-local-bin/         .local/bin              lock.sh · make_backdrop.py · calcurse · refresh scripts
-shell/             .zshrc .bashrc .profile .zshenv
-fastfetch/         config.jsonc + logo.png + themes (rendered, absolute logo path)
-brave/             .config/brave-origin-flags.conf
-session/           .config/environment.d + systemd user units (awww, lock-on-sleep)
-noctalia-state/    settings.toml template (plugin enablement, desktop widgets)
-cursors/           Bibata-Rainbow-Modern.tar.zst, extracted to ~/.icons
-packages.txt  aur-packages.txt   what the installer installs
-bootstrap.sh                     the curl one-liner: clone + install + greetd
-starship/  tmux/  nvim/  swaync/  rofi/  waybar/  picom/  polybar/  i3/  xresources/  screenlayout/  revclock/
-```
-
-**Note on `hyprland/`:** despite the name it is the shell-helper package niri
-actually calls — `start-wallpaper-one.sh`, `wallpaper-hotplug.sh`,
-`random-wallpaper.sh`, `swipe-delete-wallpaper.sh`, `record-screen.sh`,
-`search-selection.sh` and the CRT shaders, all reached through
-`~/.config/hypr/`. Don't delete that path.
-
-`system/` is the only package that needs root. The rest (`i3/`, `polybar/`,
-`picom/`, `xresources/`, `screenlayout/`, `revclock/`) are optional extras —
-install or prune them as you like.
-
----
-
-## One-command install
-
-On a fresh Arch install, as your user (never root):
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/bookenjoyer67/rice/main/bootstrap.sh | bash
-```
-
-That is the whole onboarding. `bootstrap.sh` clones this repo to `~/dotfiles`,
-installs every package it needs (`git` first — a fresh Arch install does not
-include it), runs `install.sh` to mirror the configs, builds the LD_PRELOAD
-shim, writes `/etc/greetd/config.toml` + `/etc/tuigreet/config.toml` and
-enables `greetd`, so the next reboot lands on tuigreet and logging in starts
-`niri-session`. Rerunning it is safe: the clone is fast-forwarded and every
-install step is idempotent.
-
-Flags go after `-s --`:
-
-```bash
-U=https://raw.githubusercontent.com/bookenjoyer67/rice/main/bootstrap.sh
-curl -fsSL "$U" | bash -s -- --dry-run      # print every action, change nothing
-curl -fsSL "$U" | bash -s -- --reboot       # reboot into the greeter when done
-curl -fsSL "$U" | bash -s -- --no-system    # skip /etc/greetd + greetd enable
-```
-
-Any other argument is passed straight through to `install.sh` (`--no-deps`,
-`--no-shim`). With any argument present the system stage is skipped on purpose.
-`DOTFILES_DIR` and `RICE_REPO_URL` override the checkout path and remote.
-
-Two things can only finish with no live session, so they are done by hand after
-the first login: launch Brave Origin once (its profile has to exist before the
-theme can be registered), then log out to a TTY, rerun `~/dotfiles/install.sh`
-and log back in. Noctalia rewrites `~/.local/state/noctalia/settings.toml` from
-memory when it exits, so the installer skips that file while it is running.
-
-## Install (by hand)
-
-The same result, step by step:
-
-```bash
-sudo pacman -S --needed git
-git clone <this-repo> ~/dotfiles
-cd ~/dotfiles
-
-./install.sh --dry-run            # show exactly what will be linked
-./install.sh                      # symlink everything into $HOME
-./install.sh --build-shim         # compile + install noctalia-layer-swap.so
-sudo ./install.sh --with-system   # install /etc/greetd + /etc/tuigreet configs
-```
-
-`install.sh` never deletes: anything it would overwrite is moved to
-`<name>.bak-<timestamp>` first, and `--dry-run` prints every action without
-touching the disk. Shared directories (`~/.config`, `~/.local/bin`,
-`~/.local/src`) are recursed into so packages can't clobber each other.
-
-Then reload in place (`niri msg action load-config-file`) or log out and back in.
-
-### Dependencies
-
-`./install.sh` installs everything itself: `packages.txt` (official repos) via
-pacman and `aur-packages.txt` (`brave-origin-bin`) via paru/yay, or makepkg when
-no AUR helper exists. Already-installed packages are skipped, so rerunning is a
-no-op. `--no-deps` links configs only.
-
-```
-./install.sh                 # packages + configs + Noctalia state + shim
-./install.sh --dry-run
-./install.sh --no-deps
-./install.sh --with-system   # /etc/greetd/config.toml (sudo)
-```
-
-The editor config ships with the rice: after linking, `install.sh` runs
-`nvim --headless "+Lazy! sync" +qa`, so the first `nvim` opens with its plugins
-installed instead of an empty plugin manager. Brave Origin gets
-`~/.config/brave-origin-flags.conf` (Wayland + native notifications).
-
-Prompt and greeting ship too: `starship` is initialised from `.bashrc` (guarded,
-plain PS1 if it is missing) with `starship.toml`, and `fastfetch` runs on
-interactive login shells using `fastfetch/config.jsonc` — rendered by the
-installer because its kitty-direct logo needs an absolute path.
-
-Terminals: kitty runs `fish`, and `fish/.config/fish/conf.d/rice.fish` adds the
-starship prompt plus a `fish_greeting` that prints fastfetch, so every new
-terminal opens with the fetch. conf.d is used so an existing
-`~/.config/fish/config.fish` is never replaced. Fonts: `ttf-cascadia-code-nerd`
-(kitty's CaskaydiaCove Nerd Font Mono) and `ttf-meslo-nerd` (Noctalia widgets)
-are installed, and `install.sh` reports whether each family actually resolves.
-
-### Brave Origin theme
-
-Brave Origin is themed by Noctalia's community `brave` template, but two things
-in that template assume the regular Brave build. `brave-origin-theme.py`
-(run automatically by `install.sh`) fixes both:
-
-- Brave Origin keeps its profile in `~/.config/BraveSoftware/Brave-Origin`, while
-  the template writes to `Brave-Browser`. A relative symlink bridges them.
-- The theme is an *unpacked* Chromium extension and upstream asks you to
-  "Load unpacked" by hand. The unpacked id is a pure function of the extension
-  path, so the entry is written into `Preferences` directly.
-
-`apply-wallpaper.sh` re-renders just the Brave manifest on every wallpaper change
-(`noctalia theme <image> --scheme vibrant -r ...`) and reinstalls the theme files
-— the full `templates-apply` is still avoided because it rewrites vscode, obsidian
-and other app configs on every swipe. Chromium only re-reads `Preferences` at
-startup, so the palette seed (`browser.theme.user_color`) lands the next time
-Brave is launched; the theme images update immediately. Launch Brave Origin once
-before the first install, or rerun `./install.sh` after its first start, so the
-profile exists.
+| Wallpaper Browser | `computing/wallpaper-browser` | Browse wallhaven.cc thumbnails in a panel and apply one. `Mod+Shift+B`. |
+| Wallpaper Bars | `computing/wallpaper-bars` | Spectrum bars that sample the wallpaper behind them |
+| Theme Refresh | `computing/theme-refresh` | Bar button that re-syncs the shell and widget palette |
+| Desktop Essentials | `computing/desktop-essentials` | Desktop clock, one-line weather, DeepSeek peak/price countdown |
+| Desktop Cat | `computing/desktop-cat` | Bongo Cat on the desktop: idles, blinks, sleeps, slaps its paws to the beat |
+| Spotify Port | `computing/spotport` | Status for spotport — Spotify playlists ported into YouTube Music |
+| Catwalk | `nathan/catwalk` | Animated cat for the bar. Third-party (MIT), vendored — upstream `natersalad/noctalia-catwalk` |
 
 ---
 
 ## Colour pipeline
 
 ```
-wallpaper
-   │
-   ├── Noctalia: extract Material palette (async)
-   │      ├── templates-apply ──► niri/focus-ring.kdl ──► niri msg action load-config-file
-   │      ├── bar · panels · widgets · OSD (shell-native)
-   │      └── Brave theme manifest (optional)
-   │
-   └── matugen image
-          ├── kitty theme + background
-          ├── nvim palette.lua      (SIGUSR1 → live reload)
-          └── palette.yml           (lock-screen palette, see below)
+wallpaper ──► Noctalia: extract palette ──► focus ring · bar · panels · widgets · Brave theme
+          └─► matugen image ──────────────► kitty theme + background · nvim palette · lock backdrop
 ```
 
-`niri`'s focus ring is not hand-written: `noctalia/templates.toml` renders
-`templates/niri-focus-ring.kdl` → `~/.config/niri/focus-ring.kdl` and its
-`post_hook` reloads niri's config, so the selection ring recolours with every
-wallpaper without restarting the compositor (windows untouched).
-
-`noctalia/scripts/theme-refresh.sh` forces the whole chain to re-derive.
-Noctalia ignores `wallpaper-set` when handed a path it already holds, so the
-script alternates between two scratch copies of the same image, then polls the
-rendered focus ring until its accent matches the freshly generated palette
-before applying templates — otherwise everything renders one palette behind.
-
-**Keep the `palette` matugen template.** `lock.sh` and `make_backdrop.py` read
-`~/.local/state/rice/palette.yml` as the palette for the lock-screen backdrop.
-Nothing in this rice draws a yambar bar or uses wofi.
+The niri focus ring is generated, not hand-written: `noctalia/templates.toml`
+renders `templates/niri-focus-ring.kdl` and its post-hook reloads niri's config, so
+the selection ring recolours on every wallpaper change without touching windows.
+`noctalia/scripts/theme-refresh.sh` re-runs the chain on demand.
 
 ---
 
@@ -247,7 +191,7 @@ Nothing in this rice draws a yambar bar or uses wofi.
 | Bind | Action |
 |---|---|
 | `Mod+Return` | kitty |
-| `Mod+Space` | Noctalia launcher |
+| `Mod+Space` | launcher |
 | `Mod+E` | file manager |
 | `Mod+Q` / `Mod+F` | close window / fullscreen |
 | `Mod+Shift+F` | toggle floating |
@@ -265,70 +209,38 @@ Nothing in this rice draws a yambar bar or uses wofi.
 | `Mod+Shift+L` | lock |
 | `Mod+N` | notifications + control centre |
 | `Mod+Shift+V` | clipboard history |
-| `Mod+Shift+W` | random wallpaper |
-| `Mod+Shift+B` | wallpaper browser |
+| `Mod+Shift+W` / `Mod+Shift+B` | random wallpaper / wallpaper browser |
 | `Mod+Shift+E` | power menu |
 | `Mod+Y` | yt-music panel |
 | `Mod+P` / `Mod+Print` | screenshot region / screen |
 | `Mod+Shift+R` | record screen |
 | `Mod+Shift+P` | power off monitors |
 | `Mod+Shift+Slash` | hotkey overlay |
-| `XF86Audio*`, `XF86MonBrightness*` | volume / mute / brightness (work when locked) |
+| `XF86Audio*`, `XF86MonBrightness*` | volume / mute / brightness, also when locked |
 
-Full list: `niri/.config/niri/config.kdl` (450 lines, heavily commented).
+Full list with comments: `niri/.config/niri/config.kdl`.
 
 ---
 
-## Porting checklist
+## Different hardware
 
-If you copy this rather than install it, change these first:
+Three places name this machine specifically. Change them once after the first
+install:
 
-- **Outputs.** `config.kdl` hardcodes `eDP-1` (1920x1080@144) and `HDMI-A-1`
-  (1360x768 at x=1920). The TV is deliberately fed 1360x768 — it hard-overscans
-  1080p with no OSD setting to disable it. Run `niri msg outputs` and rewrite
-  both `output` blocks.
-- **Noctalia desktop-widget outputs.** `noctalia-state/settings.toml` binds every
-  desktop widget and lockscreen box to an output *by name* (`output = "HDMI-A-1"`).
-  A machine without that output draws **no** widget surfaces at all — the plugins
-  load and the log says so, the desktop is just empty. `local-bin/noctalia-widget-retarget.py`
-  (called by `install.sh` when it can) repoints unknown names at this machine's
-  first output and drops the duplicates that collapsing two recorded outputs
-  produces — otherwise you get two clocks, two bar groups — while keeping pairs
-  that were recorded on one output on purpose. Run it with the file owner idle
-  (logged out), or from a TTY with `--assume <output>`:
+- **Outputs.** `niri/.config/niri/config.kdl` declares `eDP-1` (1920x1080@144) and
+  `HDMI-A-1` (1360x768 at x=1920). Run `niri msg outputs` and rewrite both blocks.
+  `wallpaper-hotplug.sh` and `start-wallpaper-one.sh` assume the same two outputs.
+- **Desktop-widget outputs.** `noctalia-state/settings.toml` binds widgets and the
+  lock screen to an output by name, so a machine without those names draws no
+  widget surfaces. Run this logged out, or from a TTY with `--assume`:
 
       ~/.local/bin/noctalia-widget-retarget.py --assume Virtual-1
 
-  Never edit this file under a running Noctalia: it holds the state in memory and
-  rewrites it on exit, so the write is lost, and a `config-reload` against a
-  half-written file leaves it with an empty state that it then saves (observed:
-  451-line state → 38-line stub). Placement boxes (`placement_width/height`, `cx`,
-  `cy`) keep the recorded screen's geometry — `noctalia msg desktop-widgets-edit`
-  fixes those.
-- **tuigreet theme.** tuigreet runs as user `greeter`, whose `HOME` is `/`, so it
-  never reads `~/.config/tuigreet`. The theme, title and the matrix background
-  only load from `/etc/tuigreet/config.toml` — `install.sh --with-system` renders
-  it from `tuigreet/.config/tuigreet/config.toml`, filling in `custom_title` from
-  the distro id in `/etc/os-release` and `default_user` from the user running the
-  script (`sudo`-aware), since the shipped copy says "cachyos" / "computing".
-  Verify with
-  `sudo -u greeter env HOME=/ tuigreet --dump-config | grep -A2 '\[background\]'`.
-- **`spawn-at-startup` display helpers.** `wallpaper-hotplug.sh` and
-  `start-wallpaper-one.sh` assume the two-output layout.
-- **Night light** is pinned to St. Louis: `wlsunset -l 38.6 -L -90.2`.
-- **`xwayland-satellite`** is resolved from `$PATH` (the config deliberately
-  does not pin a local build — uncomment the `xwayland-satellite { path }` block
-  if you need a specific version).
-- **`~/.local/bin` must be on `$PATH`** for `lock.sh`, the calcurse helpers and
-  the wallpaper scripts.
+- **Night light** is pinned to St. Louis: `wlsunset -l 38.6 -L -90.2` in
+  `config.kdl`.
 
-## Known quirks
-
-- **Noctalia's own state wins.** `~/.local/state/noctalia/settings.toml` loads
-  after `bar.toml`; `noctalia/bar.toml` mirrors it by hand so the rice is
-  reproducible from the repo.
-- **The wallpapers are 26 MB** of this repo. Prune `backgrounds/` if that's a
-  problem — nothing else depends on those specific images.
+`~/.local/bin` must stay on `$PATH` — `lock.sh`, the wallpaper scripts and the
+calcurse helpers live there.
 
 ---
 
@@ -337,8 +249,8 @@ If you copy this rather than install it, change these first:
 - [niri](https://github.com/YaLTeR/niri) — GPL-3.0
 - [Noctalia](https://github.com/noctalia-dev/noctalia) and its community templates
 - `nathan/catwalk` — MIT, © Nathan, ported from MannuVilasara's v4 Catwalk
-- Wallpaper images: collected from various sources; verify licensing before
-  redistributing this repo publicly.
+- Wallpaper images collected from various sources — check licensing before
+  redistributing this repo
 
 ## Licence
 
