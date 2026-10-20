@@ -1,11 +1,4 @@
 # --- local-only working copies: kept out of the repo ------------------------------
-# yambar: nothing draws a bar in this rice, but matugen's palette dump
-# (~/.config/yambar/colors.yml) is read by lock.sh, and matugen's post_hook calls
-# theme-reload.sh. Those two support files DO ship; the actual bar config and its
-# per-monitor scripts are local-only.
-yambar/.config/yambar/*
-!yambar/.config/yambar/theme-reload.sh
-!yambar/.config/yambar/colors.fallback.yml
 eww/
 wofi/
 

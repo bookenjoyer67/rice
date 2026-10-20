@@ -19,7 +19,7 @@
 set -euo pipefail
 
 CACHE="${HOME}/.cache/lockscreen"
-PALETTE="${HOME}/.config/yambar/colors.yml"
+PALETTE="${HOME}/.local/state/rice/palette.yml"
 WALL="${HOME}/.config/backgrounds/current-wallpaper"
 RING_R="${LOCK_RING_R:-210}"      # px; baked into the backdrop halo at the same radius
 FONT="${LOCK_FONT:-DejaVu Serif}"

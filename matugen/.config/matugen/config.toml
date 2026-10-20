@@ -23,12 +23,12 @@ post_hook = 'pkill -SIGUSR1 kitty 2>/dev/null || true'
 # output_path = '~/.config/eww/matugen-colors.scss'
 # post_hook = 'bash ~/.config/eww/scripts/theme-reload.sh'
 
-# yambar bars: palette -> colors.yml, consumed via the *c_* YAML anchors that
-# yambar-monitor.sh prepends to each generated per-monitor config.
-[templates.yambar]
-input_path = 'templates/yambar-colors.yml'
-output_path = '~/.config/yambar/colors.yml'
-post_hook = 'bash ~/.config/yambar/theme-reload.sh'
+# Lock-screen palette: flat c_* anchors read by lock.sh and make_backdrop.py.
+# Lives under ~/.local/state, not ~/.config/yambar — nothing in this rice draws
+# a yambar bar.
+[templates.palette]
+input_path = 'templates/palette.yml'
+output_path = '~/.local/state/rice/palette.yml'
 
 # Neovim: the base16 palette for the current wallpaper, consumed by
 # ~/.config/nvim/lua/matugen.lua. The post_hook pings every running nvim so it
@@ -37,3 +37,10 @@ post_hook = 'bash ~/.config/yambar/theme-reload.sh'
 input_path = 'templates/nvim-palette.lua'
 output_path = '~/.config/nvim/lua/palette.lua'
 post_hook = 'pkill -SIGUSR1 nvim 2>/dev/null || true'
+
+# Starship prompt: the whole config is generated (starship has no include
+# mechanism, so the palette cannot be a separate file). Starship re-reads its
+# config on every prompt, so no post_hook is needed.
+[templates.starship]
+input_path = 'templates/starship.toml'
+output_path = '~/.config/starship.toml'

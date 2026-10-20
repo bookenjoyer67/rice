@@ -28,7 +28,7 @@ def hex_rgb(h, default):
 
 
 def palette(path):
-    """Pull bg + accent from the matugen anchors yambar consumes."""
+    """Pull bg + accent from the matugen palette anchors (templates/palette.yml)."""
     vals = {}
     try:
         with open(path, encoding="utf-8") as fh:
@@ -65,7 +65,7 @@ def main():
     w, h = (int(x) for x in (sys.argv[3] if len(sys.argv) > 3 else "1920x1080").split("x"))
     r_px = float(sys.argv[5]) if len(sys.argv) > 5 else 0.0
     bg, accent = palette(sys.argv[4] if len(sys.argv) > 4 else
-                         f"{__import__('os').path.expanduser('~')}/.config/yambar/colors.yml")
+                         f"{__import__('os').path.expanduser('~')}/.local/state/rice/palette.yml")
 
     img = Image.open(src).convert("RGB")
     # cover-crop

@@ -181,7 +181,7 @@ wallpaper
    └── matugen image
           ├── kitty theme + background
           ├── nvim palette.lua      (SIGUSR1 → live reload)
-          └── yambar colors.yml     (palette dump — see below)
+          └── palette.yml           (lock-screen palette, see below)
 ```
 
 `niri`'s focus ring is not hand-written: `noctalia/templates.toml` renders
@@ -195,9 +195,9 @@ script alternates between two scratch copies of the same image, then polls the
 rendered focus ring until its accent matches the freshly generated palette
 before applying templates — otherwise everything renders one palette behind.
 
-**Keep the `yambar` matugen template.** `lock.sh` and `make_backdrop.py` read
-`~/.config/yambar/colors.yml` as the palette for the lock-screen backdrop, so
-that template is live even though nothing draws a yambar bar.
+**Keep the `palette` matugen template.** `lock.sh` and `make_backdrop.py` read
+`~/.local/state/rice/palette.yml` as the palette for the lock-screen backdrop.
+Nothing in this rice draws a yambar bar or uses wofi.
 
 ---
 

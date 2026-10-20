@@ -210,7 +210,7 @@ say ""
 for dir in "$REPO"/*/; do
   pkg="$(basename "$dir")"
   case "$pkg" in
-    system|screenshots|assets|yambar|eww|wofi) continue ;;
+    system|screenshots|assets|eww|wofi) continue ;;
   esac
   # only packages that actually contain dotfiles
   if [ -d "$dir/.config" ] || [ -d "$dir/.local" ] || [ -d "$dir/.screenlayout" ] \
@@ -278,6 +278,36 @@ if [ -f "$FF_DIR/config.jsonc" ]; then
   fi
 else
   say "  missing   fastfetch/config.jsonc"
+fi
+
+# --- starship ---------------------------------------------------------------
+# The prompt palette is generated from the wallpaper (matugen template
+# templates/starship.toml). starship has no include mechanism, so the whole file
+# is generated: ship a fallback for the window before matugen first runs, and
+# render immediately when a wallpaper is already known.
+say ""
+say "starship"
+STAR_DST="$HOME/.config/starship.toml"
+if [ -L "$STAR_DST" ]; then
+  say "  unlink    ~/.config/starship.toml (was a symlink; it is generated now)"
+  run rm -f "$STAR_DST"
+fi
+if [ "$DRY" -eq 1 ]; then
+  say "  would: render ~/.config/starship.toml with the wallpaper palette"
+elif [ -f "$STAR_DST" ]; then
+  say "  ok        ~/.config/starship.toml (regenerated on wallpaper change)"
+elif command -v matugen >/dev/null 2>&1 && [ -f "$HOME/.config/matugen/config.toml" ] \
+     && [ -n "$(readlink -f "$HOME/.config/backgrounds/current-wallpaper" 2>/dev/null)" ]; then
+  if matugen image "$(readlink -f "$HOME/.config/backgrounds/current-wallpaper")" \
+        -m dark --prefer darkness --quiet >/dev/null 2>&1; then
+    say "  render    ~/.config/starship.toml (matugen)"
+  else
+    say "  WARN      matugen failed — using the static fallback palette"
+  fi
+fi
+if [ ! -f "$STAR_DST" ] && [ -f "$REPO/starship/fallback.toml" ]; then
+  run cp -f "$REPO/starship/fallback.toml" "$STAR_DST"
+  say "  fallback  ~/.config/starship.toml (until the first wallpaper change)"
 fi
 
 # --- fonts ------------------------------------------------------------------

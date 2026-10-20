@@ -1,0 +1,133 @@
+# Static fallback palette for ~/.config/starship.toml.
+#
+# install.sh copies this when matugen has not run yet (first boot / a machine
+# without the colour pipeline). The real file is regenerated from the wallpaper
+# by matugen on the first apply-wallpaper, so these hardcoded values only ever
+# appear before the first wallpaper change.
+
+"$schema" = 'https://starship.rs/config-schema.json'
+
+# Divine Machinery — starship prompt
+# Circular pill segments: every module draws its own  caps + bg, so the
+# chain can NEVER break no matter which modules are present.
+#
+# COLOURS ARE GENERATED: this file is a matugen template. Every value in
+# [palettes.divine-machinery] is a Material role taken from the current
+# wallpaper, so the prompt follows the rice's palette like kitty and nvim do.
+# matugen renders it to ~/.config/starship.toml on every wallpaper change
+# ([templates.starship] in ~/.config/matugen/config.toml). Do not edit the
+# generated copy — edit this template.
+#
+# Each pill pairs a filled surface with its own on-colour (Material's
+# guaranteed-contrast pair), never a fixed black/white, so a light wallpaper and
+# a dark wallpaper both stay readable.
+
+format = "[💻](fg:hotpink) $username $directory $git_branch $git_status $cmd_duration $status $nodejs $rust $python $c $golang $php $java $kotlin $docker_context $time$line_break$character"
+
+palette = 'divine-machinery'
+
+[palettes.divine-machinery]
+hotpink   = "#FF1493"
+gold      = "#FFD700"
+crimson   = "#FF1744"
+red       = "#FF1744"
+green     = "#39FF14"
+cyan      = "#00FFFF"
+purple    = "#BF5FFF"
+amber     = "#FF8C00"
+parchment = "#E8E0D0"
+void      = "#0A0A0F"
+white     = "#FFFFFF"
+black     = "#0A0A0F"
+# foregrounds that pair with each pill background
+onhot     = "#FFFFFF"
+ongold    = "#0A0A0F"
+ongreen   = "#0A0A0F"
+oncyan    = "#0A0A0F"
+onpurple  = "#0A0A0F"
+onamber   = "#0A0A0F"
+onred     = "#FFFFFF"
+
+[os]
+disabled = true
+
+# HERO
+[username]
+show_always = true
+format = '[](fg:hotpink)[ 👤 $user ](fg:onhot bg:hotpink)[](fg:hotpink)'
+
+# PATH
+[directory]
+truncation_length = 5
+truncation_symbol = "../"
+format = '[](fg:black)[ 📁 $path ](fg:parchment bg:black)[](fg:black)'
+
+# BRANCH
+[git_branch]
+symbol = ""
+format = '[](fg:gold)[ $symbol $branch ](fg:ongold bg:gold)[](fg:gold)'
+
+# DIRTY STATE
+[git_status]
+format = '[](fg:crimson)[ $all_status$ahead_behind ](fg:onred bg:crimson)[](fg:crimson)'
+
+[cmd_duration]
+min_time = 2000
+format = '[](fg:black)[ 🕓 $duration ](fg:gold bg:black)[](fg:black)'
+
+[status]
+disabled = false
+symbol = "✖"
+format = '[](fg:red)[ $symbol $status ](fg:onred bg:red)[](fg:red)'
+pipestatus = true
+pipestatus_format = '[](fg:red)[ $symbol $pipestatus ](fg:onred bg:red)[](fg:red)'
+
+# LANGS
+[nodejs]
+symbol = ""
+format = '[](fg:green)[ $symbol $version ](fg:ongreen bg:green)[](fg:green)'
+
+[rust]
+symbol = ""
+format = '[](fg:amber)[ $symbol $version ](fg:onamber bg:amber)[](fg:amber)'
+
+[python]
+symbol = ""
+format = '[](fg:cyan)[ $symbol $version ](fg:oncyan bg:cyan)[](fg:cyan)'
+
+[c]
+symbol = ""
+format = '[](fg:purple)[ $symbol $version ](fg:onpurple bg:purple)[](fg:purple)'
+
+[golang]
+symbol = ""
+format = '[](fg:cyan)[ $symbol $version ](fg:oncyan bg:cyan)[](fg:cyan)'
+
+[php]
+symbol = ""
+format = '[](fg:hotpink)[ $symbol $version ](fg:onhot bg:hotpink)[](fg:hotpink)'
+
+[java]
+symbol = ""
+format = '[](fg:crimson)[ $symbol $version ](fg:onred bg:crimson)[](fg:crimson)'
+
+[kotlin]
+symbol = ""
+format = '[](fg:purple)[ $symbol $version ](fg:onpurple bg:purple)[](fg:purple)'
+
+[docker_context]
+symbol = ""
+format = '[](fg:black)[ $symbol $context ](fg:cyan bg:black)[](fg:black)'
+
+# CLOCK
+[time]
+disabled = false
+time_format = "%H:%M"
+format = '[](fg:gold)[ 🕰 $time ](fg:ongold bg:gold)[](fg:gold)'
+
+[line_break]
+disabled = false
+
+[character]
+success_symbol = '[>](bold fg:hotpink)'
+error_symbol = '[>](bold fg:red)'

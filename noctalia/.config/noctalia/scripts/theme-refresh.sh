@@ -9,7 +9,7 @@
 # shell recompute the palette and re-render the theme templates.
 #
 # What it does:
-#   1. matugen regenerates the legacy palettes (kitty / yambar / cava / ...).
+#   1. matugen regenerates the app palettes (kitty / nvim / starship / palette).
 #   2. Alternating copy + `noctalia msg wallpaper-set` -> shell palette
 #      (bar, panels, widgets, OSD) is re-extracted from the wallpaper.
 #   3. Waits for the async extraction by polling the rendered niri focus ring
@@ -65,7 +65,7 @@ fi
 
 log "theme-refresh: re-syncing palette from $WALL (via $SUB)"
 
-# 1. legacy palettes (wofi, kitty, yambar, cava, ...)
+# 1. app palettes (kitty, nvim, starship, lock-screen palette)
 if command -v matugen >/dev/null 2>&1; then
     matugen image "$SUB" -m dark --prefer darkness --quiet 2>/dev/null || true
 fi
