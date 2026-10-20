@@ -1,0 +1,51 @@
+# Desktop Cat - Bongo Cat living on your desktop as a desktop widget.
+#
+# A reimplementation of the official noctalia/bongocat idea as a
+# [[desktop_widget]] entry. Audio reactivity is driven by `cava` over
+# noctalia.runStream (Noctalia's onAudioSpectrum is a bar-widget-only callback,
+# not delivered to desktop widgets). Cat art/font reused from the official
+# noctalia/bongocat plugin (MIT; artwork by @StrayRogue).
+id = "computing/desktop-cat"
+name = "Desktop Cat"
+version = "1.0.0"
+plugin_api = 26
+author = "computing"
+license = "MIT"
+icon = "cat"
+description = "Bongo Cat on your desktop: idles, blinks, sleeps and slaps its paws to the beat."
+tags = ["fun", "animation", "desktop", "audio"]
+dependencies = ["cava"]
+
+[[setting]]
+key = "size"
+type = "int"
+label_key = "settings.size.label"
+description_key = "settings.size.description"
+default = 128
+min = 32
+max = 512
+
+[[setting]]
+key = "tappy_mode"
+type = "bool"
+label_key = "settings.tappy_mode.label"
+description_key = "settings.tappy_mode.description"
+default = true
+
+[[setting]]
+key = "rave_mode"
+type = "bool"
+label_key = "settings.rave_mode.label"
+description_key = "settings.rave_mode.description"
+default = true
+
+[[setting]]
+key = "idle_sleep"
+type = "bool"
+label_key = "settings.idle_sleep.label"
+description_key = "settings.idle_sleep.description"
+default = true
+
+[[desktop_widget]]
+id = "cat"
+entry = "cat.luau"

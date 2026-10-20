@@ -1,0 +1,33 @@
+# --- local-only working copies: kept out of the repo ------------------------------
+yambar/
+eww/
+wofi/
+
+# --- editor / live-edit leftovers -------------------------------------------------
+*.bak
+*.bak-*
+*.bak.*
+*.old
+.backup-*
+*~
+
+# stray experiment config kept in the working tree but not part of the rice
+niri/.config/niri/4
+
+# absolute symlink into ~/.cache (points at /home/computing, regenerated per wallpaper)
+backgrounds/.config/backgrounds/current-wallpaper
+
+# --- secrets: must never land in a shared repo ------------------------------------
+.env
+.env.*
+*.token
+.cf-token
+*.pem
+id_rsa*
+
+# --- junk -------------------------------------------------------------------------
+.DS_Store
+*.swp
+*~
+__pycache__/
+*.pyc

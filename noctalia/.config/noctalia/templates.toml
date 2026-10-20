@@ -1,0 +1,8 @@
+# Noctalia user template: drive niri's focus-ring ("selection ring") gradient from
+# the shell's resolved palette, so the ring matches the bar/panels and recolours
+# with every wallpaper. Emits a KDL fragment that config.kdl includes, then
+# reloads niri's config in place (no restart, windows untouched).
+[theme.templates.user.niri-focus-ring]
+input_path = "$XDG_CONFIG_HOME/noctalia/templates/niri-focus-ring.kdl"
+output_path = "$XDG_CONFIG_HOME/niri/focus-ring.kdl"
+post_hook = "niri msg action load-config-file"

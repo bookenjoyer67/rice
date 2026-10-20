@@ -1,0 +1,39 @@
+[config]
+
+
+
+[templates.kitty]
+input_path = 'templates/kitty-theme.conf'
+output_path = '~/.config/kitty/matugen-theme.conf'
+post_hook = 'kitty @ set-colors -a -c ~/.config/kitty/matugen-theme.conf 2>/dev/null || true'
+
+# kitty background only: wallpaper-derived surface color, included by kitty.conf.
+# Reload kitty (no controlling tty needed, unlike `kitty @`) so the include re-reads.
+[templates.kitty_bg]
+input_path = 'templates/kitty-bg.conf'
+output_path = '~/.config/kitty/matugen-bg.conf'
+post_hook = 'pkill -SIGUSR1 kitty 2>/dev/null || true'
+
+# EWW widgets: palette comes from Noctalia, not matugen — the shell's resolved
+# palette is rendered into ~/.config/eww/noctalia-colors.scss by the user
+# template in ~/.config/noctalia/templates.toml (post_hook: theme-reload.sh).
+# matugen's separate palette drifted from the shell colours, so it is disabled.
+# [templates.eww]
+# input_path = 'templates/eww-colors.scss'
+# output_path = '~/.config/eww/matugen-colors.scss'
+# post_hook = 'bash ~/.config/eww/scripts/theme-reload.sh'
+
+# yambar bars: palette -> colors.yml, consumed via the *c_* YAML anchors that
+# yambar-monitor.sh prepends to each generated per-monitor config.
+[templates.yambar]
+input_path = 'templates/yambar-colors.yml'
+output_path = '~/.config/yambar/colors.yml'
+post_hook = 'bash ~/.config/yambar/theme-reload.sh'
+
+# Neovim: the base16 palette for the current wallpaper, consumed by
+# ~/.config/nvim/lua/matugen.lua. The post_hook pings every running nvim so it
+# reloads the palette live (its SIGUSR1 handler) instead of needing a restart.
+[templates.nvim]
+input_path = 'templates/nvim-palette.lua'
+output_path = '~/.config/nvim/lua/palette.lua'
+post_hook = 'pkill -SIGUSR1 nvim 2>/dev/null || true'

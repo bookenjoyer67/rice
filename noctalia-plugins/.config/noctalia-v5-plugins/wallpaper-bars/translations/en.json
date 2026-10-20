@@ -1,0 +1,78 @@
+{
+  "settings": {
+    "audio_source": {
+      "description": "PipeWire source for cava. Empty follows what you hear (default output monitor)",
+      "label": "Audio source"
+    },
+    "bands": {
+      "description": "Number of spectrum bars, and of wallpaper columns sampled behind them",
+      "label": "Bands"
+    },
+    "bar_opacity": {
+      "label": "Bar opacity"
+    },
+    "brightness": {
+      "description": "How far each bar is lifted toward white so it reads on a dark wallpaper",
+      "label": "Brightness lift"
+    },
+    "color_mode": {
+      "description": "Which wallpaper pixel a bar takes its colour from",
+      "label": "Colour sampling",
+      "options": {
+        "body": "Mean of the bar's height",
+        "floor": "Fixed, at the bottom edge",
+        "tip": "At the bar's tip (moves with the music)"
+      }
+    },
+    "fade_when_idle": {
+      "label": "Fade out when idle"
+    },
+    "fps": {
+      "description": "cava frame rate; 60 is smooth, 30 halves the CPU cost",
+      "label": "Frame rate",
+      "options": {
+        "120": "120 fps",
+        "144": "144 fps",
+        "165": "165 fps",
+        "30": "30 fps",
+        "60": "60 fps"
+      }
+    },
+    "gap": {
+      "label": "Gap between bars"
+    },
+    "height": {
+      "description": "Widget height in px - match the desktop widget box",
+      "label": "Canvas height"
+    },
+    "idle_seconds": {
+      "label": "Idle before fade (s)"
+    },
+    "min_light": {
+      "description": "Minimum lightness of a bar, so dark wallpaper regions still show",
+      "label": "Minimum lightness"
+    },
+    "monitor": {
+      "description": "Output connector this widget sits on (e.g. eDP-1). Empty = match the wallpaper grid by canvas size",
+      "label": "Monitor"
+    },
+    "radius": {
+      "label": "Bar corner radius"
+    },
+    "saturation": {
+      "label": "Saturation boost"
+    },
+    "smoothing": {
+      "description": "Bar attack/release in ms. Higher is softer, 0 is raw cava",
+      "label": "Smoothing"
+    },
+    "wallpaper": {
+      "description": "Leave empty to follow the shell's current wallpaper",
+      "label": "Wallpaper image"
+    },
+    "width": {
+      "description": "Widget width in px - match the desktop widget box",
+      "label": "Canvas width"
+    }
+  }
+}

@@ -1,0 +1,80 @@
+# tuigreet — login screen for greetd on niri (CachyOS)
+# Palette matches the niri/noctalia desktop:
+#   indigo #7567e4 · pink #de61d0 · deep background #0f0b33
+# greetd runs: tuigreet --time --remember --asterisks --cmd niri-session
+# Everything below overrides/extends those flags.
+
+[general]
+log_file = "/tmp/tuigreet.log"
+# pre-fill the username field (same as --remember, but explicit)
+default_user = "computing"
+
+[display]
+show_time = true
+time_format = "%A %d %B  ·  %H:%M"
+show_title = true
+custom_title = "cachyos"
+battery = true
+align_greeting = "center"
+
+[layout]
+width = 62
+window_padding = 2
+container_padding = 2
+prompt_padding = 1
+
+[layout.widgets]
+time_position = "top"
+status_position = "bottom"
+battery_position = "right"
+
+[layout.widgets.status_bar]
+show_reset = false
+show_command = false
+show_power = true
+show_background = true
+show_session_status = true
+show_caps_lock = true
+
+[secret]
+mode = "characters"
+characters = "*"
+
+[remember]
+username = true
+session = true
+
+[theme]
+border = "#7567e4"
+container = "#0f0b33"
+title = "#de61d0"
+greet = "#b9b2ff"
+prompt = "#7567e4"
+input = "#e8e4ff"
+action = "#ff46a2"
+button = "#de61d0"
+text = "#cfc9ff"
+time = "#b9b2ff"
+
+[background]
+kind = "matrix"
+fps = 30
+
+[background.matrix]
+head_color = "#ffffff"
+bright_color = "#de61d0"
+dim_color = "#2b1b5e"
+min_length = 6
+max_length = 22
+min_speed = 0.2
+max_speed = 0.9
+
+# Optional: pin the login screen to one monitor.
+# eDP-1 = laptop panel, HDMI-A-1 = external. Uncomment to force one.
+# [[outputs]]
+# connector = "eDP-1"
+# primary = true
+#
+# [[outputs]]
+# connector = "HDMI-A-1"
+# enabled = false

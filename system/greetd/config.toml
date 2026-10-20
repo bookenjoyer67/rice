@@ -1,0 +1,12 @@
+# greetd configuration — tuigreet -> niri
+# Replaces gdm as the display manager. Written 2026-10-19.
+
+[terminal]
+# VT to run the greeter on. tty1 is free (gdm was using tty2).
+# "next" is the default; an explicit number keeps it predictable.
+vt = 1
+
+[default_session]
+# tuigreet asks for a login, then execs niri-session as that user.
+command = "tuigreet --time --remember --asterisks --cmd niri-session"
+user = "greeter"

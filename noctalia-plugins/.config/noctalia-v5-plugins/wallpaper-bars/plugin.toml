@@ -1,0 +1,188 @@
+# Wallpaper Bars - desktop audio visualizer that reads the wallpaper.
+#
+# The service runs cava (raw ASCII spectrum) and samples the wallpaper image
+# with ImageMagick: it crops the exact region that sits behind this widget,
+# then averages it into a cols x rows colour grid. The widget draws one bar per
+# spectrum band, coloured from the grid at the height the bar currently
+# reaches - so every bar takes the colour of the picture behind it, and shifts
+# through the image as the music moves.
+#
+#   [[service]]         feeds cava levels + the colour grid into noctalia.state
+#   [[desktop_widget]]  draws the bars (frame-ticked, per-band colours)
+#
+# Re-samples on its own when the wallpaper or the widget's box changes.
+id = "computing/wallpaper-bars"
+name = "Wallpaper Bars"
+version = "1.0.0"
+plugin_api = 26
+author = "computing"
+license = "MIT"
+icon = "photo"
+description = "Spectrum bars that sample the wallpaper behind them and take its colours, live."
+tags = ["audio", "desktop", "music", "wallpaper"]
+dependencies = ["cava", "magick"]
+
+[[setting]]
+key = "bands"
+type = "int"
+label_key = "settings.bands.label"
+description_key = "settings.bands.description"
+default = 64
+min = 8
+max = 128
+
+[[setting]]
+key = "gap"
+type = "double"
+label_key = "settings.gap.label"
+default = 3.0
+min = 0.0
+max = 24.0
+step = 0.5
+
+[[setting]]
+key = "radius"
+type = "double"
+label_key = "settings.radius.label"
+default = 4.0
+min = 0.0
+max = 24.0
+step = 0.5
+
+[[setting]]
+key = "color_mode"
+type = "select"
+label_key = "settings.color_mode.label"
+description_key = "settings.color_mode.description"
+default = "tip"
+options = [
+  { value = "tip", label_key = "settings.color_mode.options.tip" },
+  { value = "body", label_key = "settings.color_mode.options.body" },
+  { value = "floor", label_key = "settings.color_mode.options.floor" },
+]
+
+[[setting]]
+key = "brightness"
+type = "double"
+label_key = "settings.brightness.label"
+description_key = "settings.brightness.description"
+default = 0.18
+min = 0.0
+max = 1.0
+step = 0.02
+
+[[setting]]
+key = "saturation"
+type = "double"
+label_key = "settings.saturation.label"
+default = 1.55
+min = 0.0
+max = 3.0
+step = 0.05
+
+[[setting]]
+key = "min_light"
+type = "double"
+label_key = "settings.min_light.label"
+description_key = "settings.min_light.description"
+default = 0.42
+min = 0.0
+max = 1.0
+step = 0.02
+
+[[setting]]
+key = "bar_opacity"
+type = "double"
+label_key = "settings.bar_opacity.label"
+default = 0.92
+min = 0.1
+max = 1.0
+step = 0.02
+
+[[setting]]
+key = "smoothing"
+type = "double"
+label_key = "settings.smoothing.label"
+description_key = "settings.smoothing.description"
+default = 45.0
+min = 0.0
+max = 300.0
+step = 5.0
+
+[[setting]]
+key = "fade_when_idle"
+type = "bool"
+label_key = "settings.fade_when_idle.label"
+default = true
+
+[[setting]]
+key = "idle_seconds"
+type = "int"
+label_key = "settings.idle_seconds.label"
+default = 6
+min = 1
+max = 300
+
+[[setting]]
+key = "fps"
+type = "select"
+label_key = "settings.fps.label"
+description_key = "settings.fps.description"
+default = "60"
+options = [
+  { value = "30", label_key = "settings.fps.options.30" },
+  { value = "60", label_key = "settings.fps.options.60" },
+  { value = "120", label_key = "settings.fps.options.120" },
+  { value = "144", label_key = "settings.fps.options.144" },
+  { value = "165", label_key = "settings.fps.options.165" },
+]
+
+[[setting]]
+key = "wallpaper"
+type = "file"
+label_key = "settings.wallpaper.label"
+description_key = "settings.wallpaper.description"
+default = ""
+
+[[setting]]
+key = "audio_source"
+type = "string"
+label_key = "settings.audio_source.label"
+description_key = "settings.audio_source.description"
+default = ""
+advanced = true
+
+[[service]]
+id = "service"
+entry = "service.luau"
+
+[[desktop_widget]]
+id = "bars"
+entry = "widget.luau"
+
+# Per-instance: the canvas must match the tile's box on its own output, and
+# `monitor` picks that output's wallpaper grid (empty = match by canvas size).
+[[desktop_widget.setting]]
+key = "width"
+type = "int"
+label_key = "settings.width.label"
+description_key = "settings.width.description"
+default = 1360
+min = 100
+max = 7680
+
+[[desktop_widget.setting]]
+key = "height"
+type = "int"
+label_key = "settings.height.label"
+description_key = "settings.height.description"
+default = 768
+min = 40
+max = 4320
+
+[[desktop_widget.setting]]
+key = "monitor"
+type = "string"
+label_key = "settings.monitor.label"
+description_key = "settings.monitor.description"
+default = ""

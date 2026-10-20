@@ -1,0 +1,14 @@
+id = "nathan/catwalk"
+name = "Catwalk"
+version = "1.0.0"
+plugin_api = 14
+author = "Nathan, ported from MannuVilasara's v4 Catwalk"
+license = "MIT"
+tags = ["bar", "fun"]
+icon = "cat"
+description = "A small animated cat for the Noctalia v5 bar."
+
+[[widget]]
+id = "cat"
+entry = "widget.luau"
+

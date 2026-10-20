@@ -1,0 +1,29 @@
+# Spotify Port - bar widget showing spotport sync status.
+#
+# The heavy lifting is the spotport CLI (Python, in ~/spotport); this widget is
+# only a status light plus a trigger, and it deliberately keeps to the small
+# set of host APIs proven by the stock yt-music plugin on this machine:
+#   noctalia.readFile / runAsync / setUpdateInterval / notify / nowMs / json
+#   barWidget.setGlyph / setText / setTooltip
+#
+# Click behaviour is bound in [widget.actions] below rather than in onClick,
+# because the shell gives a manifest binding priority over a script callback.
+id = "computing/spotport"
+name = "Spotify Port"
+version = "0.1.0"
+plugin_api = 14
+author = "computing"
+license = "MIT"
+icon = "brand-spotify"
+description = "Sync status for spotport: Spotify algorithmic playlists and taste signal ported into YouTube Music."
+tags = ["music", "media"]
+dependencies = ["bash"]
+
+[[widget]]
+id = "widget"
+entry = "widget.luau"
+
+[widget.actions]
+left = "plugin computing/spotport:widget focused sync"
+right = "plugin computing/spotport:widget focused sync_dry"
+middle = "plugin computing/spotport:widget focused open_review"

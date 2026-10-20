@@ -1,0 +1,10 @@
+{
+  "settings.size.label": "Cat size (px)",
+  "settings.size.description": "Size of the desktop cat, in logical pixels.",
+  "settings.tappy_mode.label": "Tap to the beat",
+  "settings.tappy_mode.description": "Slap the paws in time with detected beats.",
+  "settings.rave_mode.label": "Rave colors on beat",
+  "settings.rave_mode.description": "Flash the cat through rainbow colors on each beat.",
+  "settings.idle_sleep.label": "Sleep when idle",
+  "settings.idle_sleep.description": "Fall asleep after five seconds without a beat."
+}

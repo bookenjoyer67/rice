@@ -1,0 +1,21 @@
+# Theme Refresh — one bar button that re-derives the rice palette from the
+# current wallpaper, for when Noctalia's async palette extraction lags behind
+# a wallpaper switch.
+#
+# The button runs ~/.config/noctalia/scripts/theme-refresh.sh, which re-runs
+# the palette half of ~/.config/hypr/scripts/apply-wallpaper.sh (matugen for
+# the legacy palettes, then Noctalia wallpaper-set to re-extract the shell
+# palette and fire the eww / niri focus-ring template hooks).
+id = "computing/theme-refresh"
+name = "Theme Refresh"
+version = "1.0.0"
+plugin_api = 30
+author = "computing"
+license = "MIT"
+icon = "refresh"
+description = "Re-sync the shell and widget palette with the current wallpaper when colour extraction lags."
+tags = ["theming", "bar", "utility"]
+
+[[widget]]
+id = "button"
+entry = "widget.luau"
