@@ -251,19 +251,21 @@ If you copy this rather than install it, change these first:
 - **Noctalia desktop-widget outputs.** `noctalia-state/settings.toml` binds every
   desktop widget and lockscreen box to an output *by name* (`output = "HDMI-A-1"`).
   A machine without that output draws **no** widget surfaces at all — the plugins
-  load and the log says so, the desktop is just empty. `install.sh` retargets any
-  unknown name to the first live output, but it can only do that while `niri msg`
-  answers *and* Noctalia is not running, which in practice means it cannot repair a
-  live session: Noctalia holds this file in memory and rewrites it on exit, and a
-  reload against a half-written file leaves it with an empty state that it then
-  saves (observed: 451-line state → 38-line stub). So on a fresh box either log
-  out and edit while nothing is running:
+  load and the log says so, the desktop is just empty. `local-bin/noctalia-widget-retarget.py`
+  (called by `install.sh` when it can) repoints unknown names at this machine's
+  first output and drops the duplicates that collapsing two recorded outputs
+  produces — otherwise you get two clocks, two bar groups — while keeping pairs
+  that were recorded on one output on purpose. Run it with the file owner idle
+  (logged out), or from a TTY with `--assume <output>`:
 
-      sed -i -E 's/output = "[^"]+"/output = "Virtual-1"/' ~/.local/state/noctalia/settings.toml
+      ~/.local/bin/noctalia-widget-retarget.py --assume Virtual-1
 
-  or drag each widget once, in session: `noctalia msg desktop-widgets-edit` — it
-  rewrites `cx`/`cy` itself, which also fixes placement boxes recorded on a
-  differently-sized screen (`placement_width/height`).
+  Never edit this file under a running Noctalia: it holds the state in memory and
+  rewrites it on exit, so the write is lost, and a `config-reload` against a
+  half-written file leaves it with an empty state that it then saves (observed:
+  451-line state → 38-line stub). Placement boxes (`placement_width/height`, `cx`,
+  `cy`) keep the recorded screen's geometry — `noctalia msg desktop-widgets-edit`
+  fixes those.
 - **tuigreet theme.** tuigreet runs as user `greeter`, whose `HOME` is `/`, so it
   never reads `~/.config/tuigreet`. The theme, title and the matrix background
   only load from `/etc/tuigreet/config.toml` — `install.sh --with-system` renders

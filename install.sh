@@ -370,40 +370,22 @@ say ""
 say "Noctalia state"
 
 # Noctalia binds every desktop widget and lockscreen box to an output BY NAME
-# (`output = "HDMI-A-1"` in settings.toml). The shipped state carries the names
-# off the machine it was recorded on, so on anything with different outputs — a
-# VM's Virtual-1, a laptop's eDP-2 — noctalia matches nothing and creates zero
-# widget surfaces. Plugins still load (the log says so); the desktop is just
-# empty, which reads like "desktop widgets are broken". Rewrite unknown names.
-live_outputs() {
-  command -v niri >/dev/null 2>&1 || return 0
-  if command -v jq >/dev/null 2>&1; then
-    niri msg --json outputs 2>/dev/null | jq -r 'keys[]' 2>/dev/null && return 0
-  fi
-  niri msg --json outputs 2>/dev/null | sed -n 's/^ *"\([^"]*\)": *{$/\1/p'
-}
-
+# (`output = "HDMI-A-1"`). The shipped state carries the names off the machine it
+# was recorded on, so a box with different outputs (a VM's Virtual-1) creates no
+# widget surfaces at all: the plugins load, the log says so, the desktop is just
+# empty. Retargeting also has to drop the duplicates that collapsing two recorded
+# outputs into one produces — otherwise you get two clocks, two bar groups.
+#
+# The work lives in local-bin/.local/bin/noctalia-widget-retarget.py so it can be
+# rerun by hand (and, later, from a session-start hook) instead of only here.
 retarget_widget_outputs() {
-  local f="$1" first name changed=0 outs
-  mapfile -t OUTS < <(live_outputs)
-  if [ "${#OUTS[@]}" -eq 0 ]; then
-    say "  skip      widget outputs: niri is not running here, so the live output"
-    say "            names are unknown. Log in, then either rerun ./install.sh or"
-    say "            drag each widget once:  noctalia msg desktop-widgets-edit"
-    return 0
+  local f="$1"
+  shift
+  if [ -x "$HOME/.local/bin/noctalia-widget-retarget.py" ]; then
+    NOCTALIA_STATE="$f" "$HOME/.local/bin/noctalia-widget-retarget.py" "$@" || true
+  else
+    say "  skip      noctalia-widget-retarget.py not linked yet (rerun after linking)"
   fi
-  outs="$(printf '%s\n' "${OUTS[@]}")"
-  first="${OUTS[0]}"
-  while IFS= read -r name; do
-    [ -n "$name" ] || continue
-    printf '%s\n' "$outs" | grep -qxF "$name" && continue
-    sed -i "s|output = \"$name\"|output = \"$first\"|g" "$f"
-    changed=$((changed + 1))
-    say "  retarget  widget output \"$name\" -> \"$first\""
-  done < <(grep -o 'output = "[^"]*"' "$f" | sed 's/.*"\(.*\)"/\1/' | sort -u)
-  [ "$changed" -gt 0 ] || say "  ok        widget outputs already match: ${OUTS[*]}"
-  say "  note      widget placement boxes still carry the recorded machine's size;"
-  say "            if one sits off-screen:  noctalia msg desktop-widgets-edit"
 }
 
 if [ -f "$STATE_SRC" ]; then
