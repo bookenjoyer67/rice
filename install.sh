@@ -92,7 +92,7 @@ _mirror() {
     [ -e "$entry" ] || continue
     base="$(basename "$entry")"
     case "$base" in
-      *.bak|*.bak-*|*.bak.*|*.old|.backup-*|*~) continue ;;
+      *.bak|*.bak-*|*.bak.*|*.old|.backup-*|*~|__pycache__|.git|.DS_Store|*.pyc) continue ;;
     esac
     dest="$destroot/$base"
     if [ -d "$entry" ] && [ ! -L "$entry" ] && is_container "$dest"; then
@@ -109,6 +109,21 @@ link_pkg() { _mirror "$1" "$HOME"; }
 # Everything the configs spawn. Guarded by `pacman -Q`, so rerunning on a
 # configured machine is a no-op instead of a 40-package reinstall prompt.
 pkg_installed() { pacman -Q "$1" >/dev/null 2>&1; }
+
+# AUR builds need makepkg. A minimal Arch install has neither an AUR helper nor
+# base-devel, so pull the toolchain in rather than skipping the one package the
+# rice actually needs from the AUR.
+ensure_build_tools() {
+  # `makepkg` ships with pacman itself, so it is not a marker for base-devel.
+  # fakeroot + debugedit are: makepkg refuses to build without them.
+  command -v paru >/dev/null 2>&1 && return 0
+  command -v yay >/dev/null 2>&1 && return 0
+  if command -v fakeroot >/dev/null 2>&1 && command -v debugedit >/dev/null 2>&1; then
+    return 0
+  fi
+  say "  install   base-devel (needed to build AUR packages)"
+  sudo pacman -S --needed --noconfirm base-devel >/dev/null || return 1
+}
 
 aur_install() {
   local pkg="$1" tmp runner=()
@@ -157,6 +172,12 @@ if [ "$DEPS" -eq 1 ]; then
     elif [ "$DRY" -eq 1 ]; then
       say "  would: pacman -S --needed ${MISSING[*]}"
     else
+      # A fresh install boots with an empty sync database: `pacman -S` then fails
+      # with "package not found" even though the package exists. Refresh first.
+      if ! pacman -Si "${MISSING[0]}" >/dev/null 2>&1; then
+        say "  refresh   pacman -Sy (empty sync database)"
+        sudo pacman -Sy --noconfirm >/dev/null || say "  WARN      pacman -Sy failed"
+      fi
       say "  install   ${#MISSING[@]} package(s)"
       sudo pacman -S --needed --noconfirm "${MISSING[@]}" || \
         say "  WARN      pacman returned non-zero — check the list above"
@@ -164,6 +185,9 @@ if [ "$DEPS" -eq 1 ]; then
 
     if [ -f "$REPO/aur-packages.txt" ]; then
       mapfile -t AWANT < <(sed -e 's/#.*//' -e '/^[[:space:]]*$/d' "$REPO/aur-packages.txt")
+      if [ "${#AWANT[@]}" -gt 0 ] && [ "$DRY" -eq 0 ]; then
+        ensure_build_tools || say "  WARN      no build toolchain — AUR packages will be skipped"
+      fi
       for p in "${AWANT[@]}"; do
         if pkg_installed "$p"; then
           say "  ok        $p (AUR)"
@@ -171,7 +195,7 @@ if [ "$DEPS" -eq 1 ]; then
           say "  would: build $p from the AUR"
         else
           say "  install   $p (AUR)"
-          aur_install "$p"
+          aur_install "$p" || say "  WARN      $p failed to build — install it later or rerun"
         fi
       done
     fi
