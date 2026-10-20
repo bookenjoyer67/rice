@@ -347,14 +347,57 @@ STATE_SRC="$REPO/noctalia-state/settings.toml"
 STATE_DST="$HOME/.local/state/noctalia/settings.toml"
 say ""
 say "Noctalia state"
+
+# Noctalia binds every desktop widget and lockscreen box to an output BY NAME
+# (`output = "HDMI-A-1"` in settings.toml). The shipped state carries the names
+# off the machine it was recorded on, so on anything with different outputs — a
+# VM's Virtual-1, a laptop's eDP-2 — noctalia matches nothing and creates zero
+# widget surfaces. Plugins still load (the log says so); the desktop is just
+# empty, which reads like "desktop widgets are broken". Rewrite unknown names.
+live_outputs() {
+  command -v niri >/dev/null 2>&1 || return 0
+  if command -v jq >/dev/null 2>&1; then
+    niri msg --json outputs 2>/dev/null | jq -r 'keys[]' 2>/dev/null && return 0
+  fi
+  niri msg --json outputs 2>/dev/null | sed -n 's/^ *"\([^"]*\)": *{$/\1/p'
+}
+
+retarget_widget_outputs() {
+  local f="$1" first name changed=0 outs
+  mapfile -t OUTS < <(live_outputs)
+  if [ "${#OUTS[@]}" -eq 0 ]; then
+    say "  skip      widget outputs: niri is not running here, so the live output"
+    say "            names are unknown. Log in, then either rerun ./install.sh or"
+    say "            drag each widget once:  noctalia msg desktop-widgets-edit"
+    return 0
+  fi
+  outs="$(printf '%s\n' "${OUTS[@]}")"
+  first="${OUTS[0]}"
+  while IFS= read -r name; do
+    [ -n "$name" ] || continue
+    printf '%s\n' "$outs" | grep -qxF "$name" && continue
+    sed -i "s|output = \"$name\"|output = \"$first\"|g" "$f"
+    changed=$((changed + 1))
+    say "  retarget  widget output \"$name\" -> \"$first\""
+  done < <(grep -o 'output = "[^"]*"' "$f" | sed 's/.*"\(.*\)"/\1/' | sort -u)
+  [ "$changed" -gt 0 ] || say "  ok        widget outputs already match: ${OUTS[*]}"
+  say "  note      widget placement boxes still carry the recorded machine's size;"
+  say "            if one sits off-screen:  noctalia msg desktop-widgets-edit"
+}
+
 if [ -f "$STATE_SRC" ]; then
-  if pgrep -x noctalia >/dev/null 2>&1; then
-    say "  SKIP      Noctalia is running: it rewrites settings.toml from memory when it"
-    say "            exits, which wipes everything below. Log out, rerun ./install.sh,"
-    say "            then log in again."
-  elif [ "$DRY" -eq 1 ]; then
+  if [ "$DRY" -eq 1 ]; then
     say "  would: render settings.toml with $HOME substituted"
+    say "  would: retarget desktop-widget/lockscreen outputs to this machine's outputs"
   else
+    # A running Noctalia keeps settings.toml in memory and writes it back when it
+    # exits, which is why this used to skip outright — but that made the widget
+    # retarget unreachable on a fresh box: from a bare TTY niri is not running, and
+    # once you log in Noctalia is. Write the file anyway and hand it to the running
+    # shell with config-reload; its in-memory copy then matches the file, so the
+    # exit rewrite is harmless instead of destructive.
+    running=0
+    pgrep -x noctalia >/dev/null 2>&1 && running=1
     if [ -f "$STATE_DST" ]; then
       say "  backup    ~/.local/state/noctalia/settings.toml -> .bak-$TS"
       cp -f "$STATE_DST" "$STATE_DST.bak-$TS"
@@ -362,6 +405,15 @@ if [ -f "$STATE_SRC" ]; then
     mkdir -p "$(dirname "$STATE_DST")"
     sed "s|/home/computing|$HOME|g" "$STATE_SRC" > "$STATE_DST"
     say "  render    ~/.local/state/noctalia/settings.toml"
+    retarget_widget_outputs "$STATE_DST"
+    if [ "$running" -eq 1 ]; then
+      if noctalia msg config-reload >/dev/null 2>&1; then
+        say "  reload    noctalia picked the new state up (config-reload)"
+      else
+        say "  WARN      Noctalia is running but refused config-reload — log out and"
+        say "            back in, then rerun this script"
+      fi
+    fi
   fi
 else
   say "  missing   noctalia-state/settings.toml"
@@ -443,6 +495,13 @@ if [ "$SYSTEM" -eq 1 ]; then
   say "Installing /etc/greetd/config.toml (sudo)"
   run sudo install -m 644 "$REPO/system/greetd/config.toml" /etc/greetd/config.toml
   say "  The session launched by the greeter is set by --cmd in that file."
+  # tuigreet runs as the `greeter` user, whose HOME is / — it therefore never
+  # reads ~/.config/tuigreet and only loads the system path. Without this copy a
+  # fresh box gets the stock greeter: no theme colours, no title, no matrix rain.
+  say "Installing /etc/tuigreet/config.toml (sudo)"
+  run sudo install -D -m 644 "$REPO/tuigreet/.config/tuigreet/config.toml" /etc/tuigreet/config.toml
+  say "  Check what the greeter will actually load:"
+  say "    sudo -u greeter env HOME=/ tuigreet --dump-config | grep -A2 '\\[background\\]'"
   say "  Enable the greeter:  sudo systemctl enable --now greetd"
 fi
 

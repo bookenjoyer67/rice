@@ -104,7 +104,7 @@ cd ~/dotfiles
 ./install.sh --dry-run            # show exactly what will be linked
 ./install.sh                      # symlink everything into $HOME
 ./install.sh --build-shim         # compile + install noctalia-layer-swap.so
-sudo ./install.sh --with-system   # install /etc/greetd/config.toml
+sudo ./install.sh --with-system   # install /etc/greetd + /etc/tuigreet configs
 ```
 
 `install.sh` never deletes: anything it would overwrite is moved to
@@ -248,6 +248,20 @@ If you copy this rather than install it, change these first:
   (1360x768 at x=1920). The TV is deliberately fed 1360x768 — it hard-overscans
   1080p with no OSD setting to disable it. Run `niri msg outputs` and rewrite
   both `output` blocks.
+- **Noctalia desktop-widget outputs.** `noctalia-state/settings.toml` binds every
+  desktop widget and lockscreen box to an output *by name* (`output = "HDMI-A-1"`).
+  A machine without that output draws **no** widget surfaces at all — the plugins
+  load and the log says so, the desktop is just empty. `install.sh` rewrites any
+  output name it can't find on this machine to the first live output, but only
+  when `niri msg` is reachable: install from a bare TTY and it can't, so log in
+  and rerun `./install.sh`, or drag each widget once with
+  `noctalia msg desktop-widgets-edit`. Placement boxes (`placement_width/height`,
+  `cx`, `cy`) keep the recorded machine's geometry — the editor fixes those.
+- **tuigreet theme.** tuigreet runs as user `greeter`, whose `HOME` is `/`, so it
+  never reads `~/.config/tuigreet`. The theme, title and the matrix background
+  only load from `/etc/tuigreet/config.toml` — `install.sh --with-system` installs
+  it. Verify with
+  `sudo -u greeter env HOME=/ tuigreet --dump-config | grep -A2 '\[background\]'`.
 - **`spawn-at-startup` display helpers.** `wallpaper-hotplug.sh` and
   `start-wallpaper-one.sh` assume the two-output layout.
 - **Night light** is pinned to St. Louis: `wlsunset -l 38.6 -L -90.2`.
