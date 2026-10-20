@@ -13,7 +13,7 @@ default_user = "computing"
 show_time = true
 time_format = "%A %d %B  ·  %H:%M"
 show_title = true
-custom_title = "cachyos"
+custom_title = "peak"
 battery = true
 align_greeting = "center"
 
