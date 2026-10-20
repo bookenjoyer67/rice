@@ -296,6 +296,15 @@ if command -v fc-match >/dev/null 2>&1; then
 else
   say "  skip      fontconfig not installed yet"
 fi
+# starship's format uses emoji (💻 👤 📁 🕰); Nerd Fonts cover the private-use
+# glyphs but not these, so without an emoji font the prompt renders tofu boxes.
+if command -v fc-list >/dev/null 2>&1; then
+  if fc-list ':charset=1f4bb' family 2>/dev/null | grep -q .; then
+    say "  ok        emoji coverage (U+1F4BB)"
+  else
+    say "  MISSING   emoji coverage — pacman -S noto-fonts-emoji"
+  fi
+fi
 
 # --- Noctalia state ---------------------------------------------------------
 # The shell's effective config lives in ~/.local/state/noctalia/settings.toml and
