@@ -251,12 +251,19 @@ If you copy this rather than install it, change these first:
 - **Noctalia desktop-widget outputs.** `noctalia-state/settings.toml` binds every
   desktop widget and lockscreen box to an output *by name* (`output = "HDMI-A-1"`).
   A machine without that output draws **no** widget surfaces at all — the plugins
-  load and the log says so, the desktop is just empty. `install.sh` rewrites any
-  output name it can't find on this machine to the first live output, but only
-  when `niri msg` is reachable: install from a bare TTY and it can't, so log in
-  and rerun `./install.sh`, or drag each widget once with
-  `noctalia msg desktop-widgets-edit`. Placement boxes (`placement_width/height`,
-  `cx`, `cy`) keep the recorded machine's geometry — the editor fixes those.
+  load and the log says so, the desktop is just empty. `install.sh` retargets any
+  unknown name to the first live output, but it can only do that while `niri msg`
+  answers *and* Noctalia is not running, which in practice means it cannot repair a
+  live session: Noctalia holds this file in memory and rewrites it on exit, and a
+  reload against a half-written file leaves it with an empty state that it then
+  saves (observed: 451-line state → 38-line stub). So on a fresh box either log
+  out and edit while nothing is running:
+
+      sed -i -E 's/output = "[^"]+"/output = "Virtual-1"/' ~/.local/state/noctalia/settings.toml
+
+  or drag each widget once, in session: `noctalia msg desktop-widgets-edit` — it
+  rewrites `cx`/`cy` itself, which also fixes placement boxes recorded on a
+  differently-sized screen (`placement_width/height`).
 - **tuigreet theme.** tuigreet runs as user `greeter`, whose `HOME` is `/`, so it
   never reads `~/.config/tuigreet`. The theme, title and the matrix background
   only load from `/etc/tuigreet/config.toml` — `install.sh --with-system` renders

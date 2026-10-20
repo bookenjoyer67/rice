@@ -250,7 +250,28 @@ if [ -x "$HOME/.local/bin/brave-origin-theme.py" ]; then
   if [ "$DRY" -eq 1 ]; then
     "$HOME/.local/bin/brave-origin-theme.py" --check
   else
+    # Two passes on purpose. The helper can only register the theme once
+    # ~/.local/share/noctalia/brave-theme/manifest.json exists, and that is
+    # created by Noctalia's `brave` community template — which declares
+    #   requires_path = "~/.config/BraveSoftware/Brave-Browser"
+    # and therefore renders nothing until the first pass has made the
+    # Brave-Browser -> Brave-Origin symlink. First pass makes the link, second
+    # pass writes the unpacked-extension entry into Preferences.
     "$HOME/.local/bin/brave-origin-theme.py"
+    if [ ! -f "$HOME/.local/share/noctalia/brave-theme/manifest.json" ]; then
+      if pgrep -x noctalia >/dev/null 2>&1; then
+        say "  render    Noctalia brave template (templates-apply)"
+        if noctalia msg templates-apply >/dev/null 2>&1; then
+          "$HOME/.local/bin/brave-origin-theme.py"
+        else
+          say "  WARN      templates-apply failed — run manually: noctalia msg templates-apply"
+        fi
+      else
+        say "  later     Brave theme needs a rendered theme pack and no running Noctalia."
+        say "            Start Brave Origin once, log into the rice, then rerun ./install.sh"
+        say "            (or: noctalia msg templates-apply && brave-origin-theme.py)"
+      fi
+    fi
   fi
 else
   say "Brave origin theme helper not linked yet (run install.sh again after linking)"
@@ -386,18 +407,16 @@ retarget_widget_outputs() {
 }
 
 if [ -f "$STATE_SRC" ]; then
-  if [ "$DRY" -eq 1 ]; then
+  if pgrep -x noctalia >/dev/null 2>&1; then
+    say "  SKIP      Noctalia is running and owns settings.toml: it regenerates the file"
+    say "            from memory when it exits, so a write here is lost. Do NOT try to"
+    say "            reload under a live shell — a reload against a half-written file"
+    say "            leaves it with an empty state and it then saves that on exit."
+    say "            Log out, rerun this script, then log in again."
+  elif [ "$DRY" -eq 1 ]; then
     say "  would: render settings.toml with $HOME substituted"
     say "  would: retarget desktop-widget/lockscreen outputs to this machine's outputs"
   else
-    # A running Noctalia keeps settings.toml in memory and writes it back when it
-    # exits, which is why this used to skip outright — but that made the widget
-    # retarget unreachable on a fresh box: from a bare TTY niri is not running, and
-    # once you log in Noctalia is. Write the file anyway and hand it to the running
-    # shell with config-reload; its in-memory copy then matches the file, so the
-    # exit rewrite is harmless instead of destructive.
-    running=0
-    pgrep -x noctalia >/dev/null 2>&1 && running=1
     if [ -f "$STATE_DST" ]; then
       say "  backup    ~/.local/state/noctalia/settings.toml -> .bak-$TS"
       cp -f "$STATE_DST" "$STATE_DST.bak-$TS"
@@ -406,14 +425,6 @@ if [ -f "$STATE_SRC" ]; then
     sed "s|/home/computing|$HOME|g" "$STATE_SRC" > "$STATE_DST"
     say "  render    ~/.local/state/noctalia/settings.toml"
     retarget_widget_outputs "$STATE_DST"
-    if [ "$running" -eq 1 ]; then
-      if noctalia msg config-reload >/dev/null 2>&1; then
-        say "  reload    noctalia picked the new state up (config-reload)"
-      else
-        say "  WARN      Noctalia is running but refused config-reload — log out and"
-        say "            back in, then rerun this script"
-      fi
-    fi
   fi
 else
   say "  missing   noctalia-state/settings.toml"
