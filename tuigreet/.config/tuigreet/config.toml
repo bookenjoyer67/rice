@@ -57,13 +57,22 @@ text = "#cfc9ff"
 time = "#b9b2ff"
 
 [background]
-kind = "matrix"
+# "matrix-peak": rainbow wave, hot pink head. Requires the patched tuigreet
+# from tuigreet-patch/build-matrix-peak.sh (stock tuigreet only knows
+# doom|matrix and would render no background at all).
+kind = "matrix-peak"
 fps = 30
 
 [background.matrix]
-head_color = "#ffffff"
+head_color = "#ff46a2"
 bright_color = "#de61d0"
 dim_color = "#2b1b5e"
+# Rainbow wave instead of the three fixed bands. hue_step = degrees of hue per
+# column (how wide the wave is), hue_speed = degrees per frame (how fast it
+# scrolls; negative reverses).
+rainbow = true
+hue_step = 3.0
+hue_speed = 2.5
 min_length = 6
 max_length = 22
 min_speed = 0.2

@@ -505,6 +505,17 @@ if [ "$SYSTEM" -eq 1 ]; then
   fi
   sed -e "s|^default_user = .*|$tui_user_line|" \
       "$TUI_SRC" > "$tui_tmp"
+  # The shipped background is the patched "matrix-peak" (tuigreet-patch/).
+  # Stock tuigreet only knows doom|matrix: an unknown kind silently renders no
+  # background at all, so degrade to "matrix" when the patched binary that the
+  # greeter would resolve is not installed.
+  tui_kind="$(sed -n 's/^kind = "\(.*\)"$/\1/p' "$tui_tmp" | head -1)"
+  if [ "$tui_kind" = "matrix-peak" ] && [ ! -x /usr/local/bin/tuigreet ]; then
+    sed -i 's/^kind = "matrix-peak"/kind = "matrix"/' "$tui_tmp"
+    say "  fallback  background matrix-peak -> matrix (patched greeter not installed)"
+    say "            install it with $REPO/tuigreet-patch/build-matrix-peak.sh,"
+    say "            then rerun this with --with-system to get the rainbow back"
+  fi
   say "Installing /etc/tuigreet/config.toml (sudo, title=\"$tui_title\", user=\"${tui_user:-<none>}\")"
   run sudo install -D -m 644 "$tui_tmp" /etc/tuigreet/config.toml
   rm -f "$tui_tmp"

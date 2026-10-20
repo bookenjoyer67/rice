@@ -108,7 +108,7 @@ Reload in place with `niri msg action load-config-file`, or log out and back in.
 | **Noctalia v5** | Bar on every output, notifications, SNI tray, launcher, control centre, wallpaper picker, OSD |
 | **matugen** | Material 3 palette extraction, rendered into kitty, Neovim and the lock-screen palette |
 | **awww** | Per-output wallpaper daemon |
-| **tuigreet + greetd** | Text login that `exec`s `niri-session` on tty1 |
+| **tuigreet + greetd** | Text login that `exec`s `niri-session` on tty1; the shipped theme renders the patched "Matrix Peak" background (rainbow wave, hot pink head) |
 | **kitty** | Daily-driver terminal, running fish; alacritty and ghostty ship as alternatives |
 | **swaylock** | Lock screen with a palette-matched backdrop |
 | **Noctalia plugins** | Seven Luau plugins — bar widgets, desktop widgets, wallpaper browser |
@@ -117,6 +117,30 @@ Reload in place with `niri msg action load-config-file`, or log out and back in.
 Also installed: Neovim + plugins, starship, fastfetch, tmux, cliphist, grim/slurp,
 wf-recorder, brightnessctl, wlsunset, xwayland-satellite, pipewire, the Caskaydia
 Cove and Meslo Nerd Fonts, and Brave Origin from the AUR.
+
+---
+
+## Login screen
+
+The greeter runs the stock `tuigreet` binary from the repos, except for one
+patch: the shipped theme asks for `kind = "matrix-peak"`, a matrix rain whose
+trail scrolls through the spectrum with a hot pink leading glyph, listed in the
+greeter's background switcher (F4) as **Matrix Peak**. Stock tuigreet only knows
+`doom` and `matrix`, so build the patched binary once:
+
+```bash
+~/dotfiles/tuigreet-patch/build-matrix-peak.sh            # clones the matching
+                                                          # tuigreet tag, applies
+                                                          # the patch, installs
+                                                          # /usr/local/bin/tuigreet
+sudo env HOME="$HOME" ~/dotfiles/install.sh --with-system  # re-render /etc/tuigreet
+```
+
+`/usr/local/bin/tuigreet` wins over the packaged `/usr/bin/tuigreet` in greetd's
+PATH, so the package stays untouched; `build-matrix-peak.sh --uninstall` puts the
+stock binary back. Rainbow speed and width live in
+`tuigreet/.config/tuigreet/config.toml` as `hue_speed` and `hue_step`. After a
+tuigreet package update, rebuild with `TUIGREET_TAG=<new version>`.
 
 ---
 
@@ -134,6 +158,8 @@ kitty/  alacritty/  ghostty/               terminal configs
 hypr/              .config/hypr            wallpaper, screenshot and recording helpers niri calls
 backgrounds/       .config/backgrounds     wallpapers
 tuigreet/          .config/tuigreet        login screen theme
+tuigreet-patch/    matrix-peak.patch       patches tuigreet with the rainbow
+                   build-matrix-peak.sh    "Matrix Peak" background + installs it
 system/            greetd/config.toml      installed by --with-system
 layer-swap/        .local/src/noctalia-layer-swap   shim source, Makefile, protocol XML
 local-bin/         .local/bin              lock.sh · make_backdrop.py · calcurse · refresh scripts

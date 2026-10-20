@@ -1,0 +1,275 @@
+diff --git a/crates/tuigreet-config/src/schema.rs b/crates/tuigreet-config/src/schema.rs
+index b796a32..ab755dc 100644
+--- a/crates/tuigreet-config/src/schema.rs
++++ b/crates/tuigreet-config/src/schema.rs
+@@ -582,6 +582,21 @@ pub struct MatrixConfig {
+   /// shimmer). `0.0` disables.
+   #[serde(default)]
+   pub mutate_chance: Option<f32>,
++
++  /// Paint the trail as a scrolling rainbow wave instead of the three-band
++  /// gradient. Defaults to on for `kind = "matrix-peak"`, off otherwise.
++  #[serde(default)]
++  pub rainbow: Option<bool>,
++
++  /// Hue advance in degrees per terminal column — how wide the rainbow wave
++  /// is across the screen. Defaults to 3.
++  #[serde(default)]
++  pub hue_step: Option<f32>,
++
++  /// Hue advance in degrees per frame — how fast the wave scrolls. Negative
++  /// values reverse it. Defaults to 2.5.
++  #[serde(default)]
++  pub hue_speed: Option<f32>,
+ }
+ 
+ /// Greeting alignment options
+diff --git a/crates/tuigreet/src/greeter.rs b/crates/tuigreet/src/greeter.rs
+index f768fa4..afcb6a4 100644
+--- a/crates/tuigreet/src/greeter.rs
++++ b/crates/tuigreet/src/greeter.rs
+@@ -1191,8 +1191,12 @@ impl Greeter {
+           bottom: parse(&cfg.doom.bottom_color, d.bottom),
+         })
+       },
+-      Kind::Matrix => {
+-        let d = matrix::Options::default();
++      Kind::Matrix | Kind::MatrixPeak => {
++        let d = if matches!(kind, Kind::MatrixPeak) {
++          matrix::Options::peak()
++        } else {
++          matrix::Options::default()
++        };
+         AnimationSpec::Matrix(matrix::Options {
+           head:          parse(&cfg.matrix.head_color, d.head),
+           bright:        parse(&cfg.matrix.bright_color, d.bright),
+@@ -1202,8 +1206,11 @@ impl Greeter {
+           min_speed:     cfg.matrix.min_speed.unwrap_or(d.min_speed),
+           max_speed:     cfg.matrix.max_speed.unwrap_or(d.max_speed),
+           mutate_chance: cfg.matrix.mutate_chance.unwrap_or(d.mutate_chance),
++          rainbow:       cfg.matrix.rainbow.unwrap_or(d.rainbow),
++          hue_step:      cfg.matrix.hue_step.unwrap_or(d.hue_step),
++          hue_speed:     cfg.matrix.hue_speed.unwrap_or(d.hue_speed),
+         })
+-      },
++      }
+     };
+     self.animation = Some(bg_animation::build(&spec));
+     self.animation_fps = Some(cfg.fps.unwrap_or(ANIMATION_DEFAULT_FPS));
+diff --git a/crates/tuigreet/src/ui/bg_animation/matrix.rs b/crates/tuigreet/src/ui/bg_animation/matrix.rs
+index 83e2d2b..af3db90 100644
+--- a/crates/tuigreet/src/ui/bg_animation/matrix.rs
++++ b/crates/tuigreet/src/ui/bg_animation/matrix.rs
+@@ -62,6 +62,34 @@ pub struct Options {
+   /// Probability per frame, per active cell, of replacing the glyph with a
+   /// fresh random one — gives the trail its faint shimmer. `0.0` disables.
+   pub mutate_chance: f32,
++
++  /// Paint the trail as a rainbow wave instead of the three-band gradient.
++  /// The head keeps `head`; every other cell takes its hue from the screen
++  /// position plus the animation clock, so the rainbow scrolls across the
++  /// whole terminal over time.
++  pub rainbow: bool,
++
++  /// Hue advance, in degrees, per terminal column. Sets the width of the
++  /// wave across the screen.
++  pub hue_step: f32,
++
++  /// Hue advance, in degrees, per frame. Sets how fast the wave travels.
++  pub hue_speed: f32,
++}
++
++/// Hot pink used as the leading glyph of the "Matrix Peak" variant.
++pub const PEAK_HEAD: Color = Color::Rgb(0xFF, 0x46, 0xA2);
++
++impl Options {
++  /// Options for the "Matrix Peak" variant: rainbow wave, hot pink head.
++  #[must_use]
++  pub fn peak() -> Self {
++    Self {
++      head: PEAK_HEAD,
++      rainbow: true,
++      ..Self::default()
++    }
++  }
+ }
+ 
+ impl Default for Options {
+@@ -75,10 +103,35 @@ impl Default for Options {
+       min_speed:     0.30,
+       max_speed:     1.10,
+       mutate_chance: 0.02,
++      rainbow:       false,
++      hue_step:      3.0,
++      hue_speed:     2.5,
+     }
+   }
+ }
+ 
++/// Convert a hue (degrees) into a fully saturated RGB colour, darkened for
++/// the fading tail of a stream.
++fn hue_rgb(hue: f32, dim: bool) -> Color {
++  let h = hue.rem_euclid(360.0) / 60.0;
++  let sat = if dim { 0.70 } else { 1.0 };
++  let val = if dim { 0.45 } else { 1.0 };
++
++  let c = val * sat;
++  let x = c * (1.0 - ((h % 2.0) - 1.0).abs());
++  let (r, g, b) = match h as u32 {
++    0 => (c, x, 0.0),
++    1 => (x, c, 0.0),
++    2 => (0.0, c, x),
++    3 => (0.0, x, c),
++    4 => (x, 0.0, c),
++    _ => (c, 0.0, x),
++  };
++  let m = val - c;
++  let to_u8 = |v: f32| ((v + m) * 255.0).clamp(0.0, 255.0) as u8;
++  Color::Rgb(to_u8(r), to_u8(g), to_u8(b))
++}
++
+ /// Per-column state. Each column has at most one active stream; when it
+ /// runs off the bottom of the screen we wait `cooldown` frames before
+ /// spawning a fresh one above the top edge.
+@@ -113,6 +166,9 @@ pub struct Matrix {
+   cells:  Vec<Cell>,
+   opts:   Options,
+   rng:    StdRng,
++  /// Animation clock in degrees, advanced by `opts.hue_speed` per frame.
++  /// Drives the rainbow wave that scrolls across the screen.
++  phase:  f32,
+ }
+ 
+ impl Matrix {
+@@ -122,6 +178,7 @@ impl Matrix {
+     opts.max_speed = opts.max_speed.max(opts.min_speed).max(0.05);
+     opts.min_speed = opts.min_speed.max(0.05);
+     opts.mutate_chance = opts.mutate_chance.clamp(0.0, 1.0);
++    opts.hue_speed = opts.hue_speed.clamp(-60.0, 60.0);
+ 
+     let seed = SystemTime::now()
+       .duration_since(UNIX_EPOCH)
+@@ -135,6 +192,7 @@ impl Matrix {
+       cells: Vec::new(),
+       opts,
+       rng: StdRng::seed_from_u64(seed),
++      phase: 0.0,
+     }
+   }
+ 
+@@ -200,6 +258,7 @@ impl Animation for Matrix {
+     if self.width == 0 || self.height == 0 {
+       return;
+     }
++    self.phase = (self.phase + self.opts.hue_speed).rem_euclid(360.0);
+     let w = self.width as usize;
+     let h = self.height as i32;
+ 
+@@ -291,8 +350,17 @@ impl Animation for Matrix {
+           continue;
+         }
+         let length = self.cols[lx as usize].length.max(1);
+-        let fg = if cell.age == 1 {
++        // Rainbow wave: hue follows the column plus the animation clock, so
++        // the whole screen scrolls through the spectrum; the leading glyph
++        // keeps the configured head colour and the last third of the trail
++        // is darkened. The stamp ages to 2 on the frame it is painted, so the
++        // two youngest ages count as the head here.
++        let head = cell.age == 1 || (self.opts.rainbow && cell.age == 2);
++        let fg = if head {
+           self.opts.head
++        } else if self.opts.rainbow {
++          let hue = self.phase + lx as f32 * self.opts.hue_step;
++          hue_rgb(hue, cell.age * 3 > length * 2)
+         } else if cell.age * 3 <= length {
+           self.opts.bright
+         } else {
+@@ -382,4 +450,45 @@ mod tests {
+     assert_eq!(m.cells.len(), 96);
+     assert_eq!(m.cols.len(), 16);
+   }
++
++  #[test]
++  fn hue_wheel_hits_primaries() {
++    assert_eq!(hue_rgb(0.0, false), Color::Rgb(255, 0, 0));
++    assert_eq!(hue_rgb(120.0, false), Color::Rgb(0, 255, 0));
++    assert_eq!(hue_rgb(240.0, false), Color::Rgb(0, 0, 255));
++    // Wraps, and the faded variant is darker than the bright one.
++    assert_eq!(hue_rgb(360.0, false), hue_rgb(0.0, false));
++    assert_ne!(hue_rgb(200.0, true), hue_rgb(200.0, false));
++  }
++
++  #[test]
++  fn rainbow_paints_many_hues_and_keeps_the_pink_head() {
++    let mut m = fixed(Options::peak());
++    m.resize(Rect::new(0, 0, 60, 24));
++    for _ in 0..40 {
++      m.step();
++    }
++    let mut buf = Buffer::empty(Rect::new(0, 0, 60, 24));
++    m.render(Rect::new(0, 0, 60, 24), &mut buf);
++
++    let mut colors = std::collections::HashSet::new();
++    let mut heads = 0usize;
++    for y in 0..24 {
++      for x in 0..60 {
++        if let Color::Rgb(r, g, b) = buf[(x, y)].fg {
++          if (r, g, b) == (0xFF, 0x46, 0xA2) {
++            heads += 1;
++          } else {
++            colors.insert((r, g, b));
++          }
++        }
++      }
++    }
++    assert!(heads > 0, "peak head must be the hot pink");
++    assert!(
++      colors.len() >= 8,
++      "rainbow should paint several hues, got {}",
++      colors.len()
++    );
++  }
+ }
+diff --git a/crates/tuigreet/src/ui/bg_animation/mod.rs b/crates/tuigreet/src/ui/bg_animation/mod.rs
+index dff1af6..25c22f5 100644
+--- a/crates/tuigreet/src/ui/bg_animation/mod.rs
++++ b/crates/tuigreet/src/ui/bg_animation/mod.rs
+@@ -24,6 +24,8 @@ pub trait Animation: Send + Sync {
+ pub enum Kind {
+   Doom,
+   Matrix,
++  /// Matrix with a rainbow trail and a hot pink head.
++  MatrixPeak,
+ }
+ 
+ /// Catalog entry for a registered animation kind.
+@@ -46,6 +48,11 @@ pub const KINDS: &[KindInfo] = &[
+     name:  "matrix",
+     label: "Matrix",
+   },
++  KindInfo {
++    kind:  Kind::MatrixPeak,
++    name:  "matrix-peak",
++    label: "Matrix Peak",
++  },
+ ];
+ 
+ impl Kind {
+@@ -54,6 +61,9 @@ impl Kind {
+     match name.trim().to_ascii_lowercase().as_str() {
+       "doom" | "fire" => Some(Self::Doom),
+       "matrix" | "cmatrix" => Some(Self::Matrix),
++      "matrix-peak" | "matrix peak" | "matrixpeak" | "peak" => {
++        Some(Self::MatrixPeak)
++      },
+       _ => None,
+     }
+   }
+@@ -81,6 +91,7 @@ impl Kind {
+     match self {
+       Self::Doom => AnimationSpec::Doom(doom::Options::default()),
+       Self::Matrix => AnimationSpec::Matrix(matrix::Options::default()),
++      Self::MatrixPeak => AnimationSpec::Matrix(matrix::Options::peak()),
+     }
+   }
+ }
