@@ -32,19 +32,39 @@ IMG="$(readlink -f "$IMG")"
 LINK="$HOME/.config/backgrounds/current-wallpaper"
 
 # 1. paint
-awww img "$IMG" --transition-type random --transition-duration 2 "$@" 2>/dev/null \
-    || awww img "$IMG" "$@" 2>/dev/null \
-    || true
+# The exit status of the whole script is what the Noctalia wallpaper browser
+# reports as "Could not apply wallpaper", so make that status mean exactly one
+# thing: the wallpaper did not land. Palette/template failures below are warned
+# about and downgraded, because the image IS on screen at that point.
+PAINTED=0
+if awww img "$IMG" --transition-type random --transition-duration 2 "$@" 2>/dev/null \
+   || awww img "$IMG" "$@" 2>/dev/null; then
+    PAINTED=1
+elif awww query 2>/dev/null | grep -q "image: $IMG"; then
+    PAINTED=1   # already showing this image (awww refuses a no-op re-apply)
+fi
+if [ "$PAINTED" -eq 0 ]; then
+    echo "apply-wallpaper: awww did not paint $IMG (is awww-daemon running?)" >&2
+    exit 1
+fi
 
 # 2. remember
 ln -sf "$IMG" "$LINK"
 
-# 3. app palettes (kitty, nvim)
-matugen image "$IMG" -m dark --prefer darkness --quiet 2>/dev/null || true
+# 3. app palettes (kitty, nvim, starship, lock palette). A failure here means the
+#    image is painted but the theme did not follow — say so instead of exiting
+#    silently, which is what made "applied but nothing changed" so confusing.
+if command -v matugen >/dev/null 2>&1; then
+    if ! matugen image "$IMG" -m dark --prefer darkness --quiet >/dev/null 2>&1; then
+        echo "apply-wallpaper: matugen failed — wallpapers will not re-colour" >&2
+    fi
+fi
 
 # 4. Noctalia shell palette follows the wallpaper
 if command -v noctalia >/dev/null 2>&1; then
-    noctalia msg wallpaper-set "$IMG" >/dev/null 2>&1 || true
+    if ! noctalia msg wallpaper-set "$IMG" >/dev/null 2>&1; then
+        echo "apply-wallpaper: noctalia wallpaper-set failed — shell palette stale" >&2
+    fi
 fi
 
 # 5. Brave theme (Noctalia community "brave" template). Noctalia only re-renders
