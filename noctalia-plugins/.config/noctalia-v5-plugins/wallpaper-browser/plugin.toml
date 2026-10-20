@@ -10,11 +10,13 @@
 #
 #   [[panel]]     the browser window
 #   [[shortcut]]  control-center tile that toggles it
+#   [[widget]]    bar button (left = browser, right = random switch)
 #
 # Open with: noctalia msg panel-toggle computing/wallpaper-browser:browser
+# On the bar as: computing/wallpaper-browser:button
 id = "computing/wallpaper-browser"
 name = "Wallpaper Browser"
-version = "1.0.0"
+version = "1.1.0"
 plugin_api = 30
 author = "computing"
 license = "MIT"
@@ -35,3 +37,7 @@ layer = "overlay"
 [[shortcut]]
 id = "open"
 entry = "shortcut.luau"
+
+[[widget]]
+id = "button"
+entry = "button.luau"

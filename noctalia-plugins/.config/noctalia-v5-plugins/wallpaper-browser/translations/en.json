@@ -49,6 +49,9 @@
     "resolving": "Looking up {id}\u2026",
     "searching": "Searching\u2026"
   },
+  "widget": {
+    "tooltip": "Wallpapers — left click: browse wallhaven, right click: random switch"
+  },
   "tooltip": {
     "ban": "Ban this wallpaper id",
     "close": "Close",

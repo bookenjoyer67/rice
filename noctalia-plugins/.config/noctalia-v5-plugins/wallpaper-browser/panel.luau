@@ -258,6 +258,11 @@ local function apply(it)
     busy = true
     status = noctalia.tr("status.applying", { id = it.id })
     render()
+    -- 60000 is the API's clamp maximum. Without it the call used the default
+    -- (a few seconds) and a normal wallhaven download + palette regeneration blew
+    -- through it: the process was killed after awww painted but before matugen
+    -- ran, which surfaced as "Could not apply wallpaper" with an empty stderr,
+    -- a wallpaper that WAS applied, and a theme that never changed.
     noctalia.runAsync({ "bash", pluginDir .. "/apply.sh", it.id, it.path }, function(res)
         busy = false
         if res ~= nil and res.exitCode == 0 then
@@ -286,7 +291,7 @@ local function apply(it)
                 (res and tostring(res.stderr or ""):sub(1, 200)) or "")
         end
         render()
-    end)
+    end, 60000)
 end
 
 -- ---------------------------------------------------------------- ui

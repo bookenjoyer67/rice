@@ -32,7 +32,8 @@ mkdir -p "$CACHE_DIR"
 dest="$CACHE_DIR/wallpaper.$ext"
 tmp="$dest.part"
 
-if ! curl -fsS --max-time 120 -A "$UA" -o "$tmp" "$URL"; then
+# Bounded well under Noctalia's 60 s runAsync clamp (see panel.luau apply()).
+if ! curl -fsS --connect-timeout 10 --max-time 45 -A "$UA" -o "$tmp" "$URL"; then
     rm -f "$tmp"
     echo "apply.sh: download failed for $ID" >&2
     exit 1
