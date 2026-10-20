@@ -21,3 +21,7 @@ export SDKMAN_DIR="$HOME/.sdkman"
 
 [ -f "$HOME/.terminal-juice-aliases" ] && source "$HOME/.terminal-juice-aliases"
 alias sybau='sudo pacman -Syu'
+
+# Prompt: starship (config: ~/.config/starship.toml). Guarded so a machine without
+# it still gets the plain PS1 above instead of an error on every shell.
+command -v starship >/dev/null 2>&1 && eval "$(starship init bash)"

@@ -256,6 +256,30 @@ else
   say "Brave origin theme helper not linked yet (run install.sh again after linking)"
 fi
 
+# --- fastfetch --------------------------------------------------------------
+# The config carries an absolute logo path (fastfetch's kitty-direct logo reads
+# the file directly), so it is rendered rather than symlinked, like the Noctalia
+# state. Everything else in ~/.config/fastfetch is copied.
+FF_DIR="$REPO/fastfetch"
+say ""
+say "fastfetch"
+if [ -f "$FF_DIR/config.jsonc" ]; then
+  if [ "$DRY" -eq 1 ]; then
+    say "  would: render ~/.config/fastfetch/config.jsonc + logo + themes"
+  else
+    if [ -L "$HOME/.config/fastfetch" ]; then
+      rm -f "$HOME/.config/fastfetch"          # stale symlink from an older install
+    fi
+    mkdir -p "$HOME/.config/fastfetch/themes"
+    sed "s|/home/computing|$HOME|g" "$FF_DIR/config.jsonc" > "$HOME/.config/fastfetch/config.jsonc"
+    cp -f "$FF_DIR/logo.png" "$HOME/.config/fastfetch/logo.png" 2>/dev/null || true
+    cp -f "$FF_DIR"/themes/*.jsonc "$HOME/.config/fastfetch/themes/" 2>/dev/null || true
+    say "  render    ~/.config/fastfetch/config.jsonc"
+  fi
+else
+  say "  missing   fastfetch/config.jsonc"
+fi
+
 # --- Noctalia state ---------------------------------------------------------
 # The shell's effective config lives in ~/.local/state/noctalia/settings.toml and
 # loads AFTER ~/.config/noctalia/bar.toml. It is where plugin enablement, the

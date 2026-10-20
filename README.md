@@ -74,7 +74,8 @@ system/            greetd/config.toml      system file, installed with --with-sy
 layer-swap/        .local/src/noctalia-layer-swap   C shim source + Makefile + protocol XML
 local-bin/         .local/bin              lock.sh · make_backdrop.py · calcurse · refresh scripts
 shell/             .zshrc .bashrc .profile .zshenv
-brave/             .config/brave-flags.conf
+fastfetch/         config.jsonc + logo.png + themes (rendered, absolute logo path)
+brave/             .config/brave-origin-flags.conf
 session/           .config/environment.d + systemd user units (awww, lock-on-sleep)
 noctalia-state/    settings.toml template (plugin enablement, desktop widgets)
 cursors/           Bibata-Rainbow-Modern.tar.zst, extracted to ~/.icons
@@ -131,6 +132,11 @@ The editor config ships with the rice: after linking, `install.sh` runs
 `nvim --headless "+Lazy! sync" +qa`, so the first `nvim` opens with its plugins
 installed instead of an empty plugin manager. Brave Origin gets
 `~/.config/brave-origin-flags.conf` (Wayland + native notifications).
+
+Prompt and greeting ship too: `starship` is initialised from `.bashrc` (guarded,
+plain PS1 if it is missing) with `starship.toml`, and `fastfetch` runs on
+interactive login shells using `fastfetch/config.jsonc` — rendered by the
+installer because its kitty-direct logo needs an absolute path.
 
 ### Brave Origin theme
 

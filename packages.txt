@@ -57,6 +57,8 @@ ripgrep
 fd
 
 # fonts + build/runtime helpers
+starship
+fastfetch
 ttf-meslo-nerd
 zstd
 gcc
