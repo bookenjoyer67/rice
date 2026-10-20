@@ -80,6 +80,7 @@ session/           .config/environment.d + systemd user units (awww, lock-on-sle
 noctalia-state/    settings.toml template (plugin enablement, desktop widgets)
 cursors/           Bibata-Rainbow-Modern.tar.zst, extracted to ~/.icons
 packages.txt  aur-packages.txt   what the installer installs
+bootstrap.sh                     the curl one-liner: clone + install + greetd
 starship/  tmux/  nvim/  swaync/  rofi/  waybar/  picom/  polybar/  i3/  xresources/  screenlayout/  revclock/
 ```
 
@@ -95,9 +96,47 @@ install or prune them as you like.
 
 ---
 
-## Install
+## One-command install
+
+On a fresh Arch install, as your user (never root):
 
 ```bash
+curl -fsSL https://raw.githubusercontent.com/bookenjoyer67/rice/main/bootstrap.sh | bash
+```
+
+That is the whole onboarding. `bootstrap.sh` clones this repo to `~/dotfiles`,
+installs every package it needs (`git` first — a fresh Arch install does not
+include it), runs `install.sh` to mirror the configs, builds the LD_PRELOAD
+shim, writes `/etc/greetd/config.toml` + `/etc/tuigreet/config.toml` and
+enables `greetd`, so the next reboot lands on tuigreet and logging in starts
+`niri-session`. Rerunning it is safe: the clone is fast-forwarded and every
+install step is idempotent.
+
+Flags go after `-s --`:
+
+```bash
+U=https://raw.githubusercontent.com/bookenjoyer67/rice/main/bootstrap.sh
+curl -fsSL "$U" | bash -s -- --dry-run      # print every action, change nothing
+curl -fsSL "$U" | bash -s -- --reboot       # reboot into the greeter when done
+curl -fsSL "$U" | bash -s -- --no-system    # skip /etc/greetd + greetd enable
+```
+
+Any other argument is passed straight through to `install.sh` (`--no-deps`,
+`--no-shim`). With any argument present the system stage is skipped on purpose.
+`DOTFILES_DIR` and `RICE_REPO_URL` override the checkout path and remote.
+
+Two things can only finish with no live session, so they are done by hand after
+the first login: launch Brave Origin once (its profile has to exist before the
+theme can be registered), then log out to a TTY, rerun `~/dotfiles/install.sh`
+and log back in. Noctalia rewrites `~/.local/state/noctalia/settings.toml` from
+memory when it exits, so the installer skips that file while it is running.
+
+## Install (by hand)
+
+The same result, step by step:
+
+```bash
+sudo pacman -S --needed git
 git clone <this-repo> ~/dotfiles
 cd ~/dotfiles
 
