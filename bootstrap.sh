@@ -57,9 +57,17 @@ if ! command -v git >/dev/null 2>&1; then
 fi
 
 # --- fetch -----------------------------------------------------------------
+# A full clone, not --depth 1: a shallow checkout cannot fast-forward onto new
+# upstream commits later ("refusing to merge unrelated histories"), which breaks
+# the rerun this bootstrapper is documented to be safe for.
 if [ -d "$DEST/.git" ]; then
   say "==> updating $DEST (fast-forward only; local changes are never touched)"
-  git -C "$DEST" fetch --depth 1 origin "$BRANCH"
+  if [ -f "$DEST/.git/shallow" ]; then
+    say "    shallow checkout — fetching full history once so future updates fast-forward"
+    git -C "$DEST" fetch --unshallow origin "$BRANCH" || git -C "$DEST" fetch origin "$BRANCH"
+  else
+    git -C "$DEST" fetch origin "$BRANCH"
+  fi
   git -C "$DEST" checkout -q "$BRANCH"
   git -C "$DEST" merge --ff-only "origin/$BRANCH" \
     || die "$DEST has local commits or changes — reconcile it, or set DOTFILES_DIR to a fresh path."
@@ -67,7 +75,7 @@ elif [ -e "$DEST" ]; then
   die "$DEST exists and is not a git checkout — move it aside or set DOTFILES_DIR."
 else
   say "==> cloning $REPO_URL -> $DEST"
-  git clone --depth 1 --branch "$BRANCH" "$REPO_URL" "$DEST"
+  git clone --branch "$BRANCH" "$REPO_URL" "$DEST"
 fi
 
 cd "$DEST"
