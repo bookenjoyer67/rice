@@ -63,6 +63,11 @@ ttf-meslo-nerd
 ttf-cascadia-code-nerd
 noto-fonts-emoji
 fish
+tmux
+nodejs
+npm
+unzip
+tree-sitter-cli
 zstd
 gcc
 make
