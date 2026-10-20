@@ -4,7 +4,7 @@
 -- (the exact script the eww deepseek widget polled every 60s). Re-polled once a
 -- minute so the countdown matches what eww showed.
 
-local HOME = os.getenv("HOME") or ""
+local HOME = noctalia.getenv("HOME") or ""
 local SCRIPT = HOME .. "/.local/bin/deepseek_price.sh"
 local REFRESH_SECONDS = 60
 

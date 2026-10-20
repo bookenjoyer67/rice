@@ -1,0 +1,64 @@
+# Packages install.sh installs with pacman. One name per line; '#' comments.
+# Everything here is in the official Arch repos. AUR-only packages live in
+# aur-packages.txt.
+
+# compositor + shell
+niri
+noctalia
+
+# wallpaper + colour pipeline
+awww
+matugen
+imagemagick
+
+# session / login
+greetd
+greetd-tuigreet
+
+# terminals + shell utilities the configs spawn
+kitty
+cliphist
+wl-clipboard
+jq
+curl
+python
+python-pillow
+
+# screenshots, recording, brightness, night light, X11 apps
+grim
+slurp
+wf-recorder
+brightnessctl
+wlsunset
+xwayland-satellite
+
+# tray, audio, notifications
+network-manager-applet
+pipewire
+pipewire-audio
+pipewire-pulse
+wireplumber
+libnotify
+
+# lock screen + calendar helper
+swaylock
+calcurse
+
+# desktop widgets / bar plugins
+cava
+yt-dlp
+mpv
+mpv-mpris
+openbsd-netcat
+
+# editor (config lives in nvim/)
+neovim
+ripgrep
+fd
+
+# fonts + build/runtime helpers
+ttf-meslo-nerd
+zstd
+gcc
+make
+git

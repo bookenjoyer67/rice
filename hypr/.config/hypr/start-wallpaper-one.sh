@@ -7,6 +7,14 @@ set -euo pipefail
 APPLY="$HOME/.config/hypr/scripts/apply-wallpaper.sh"
 FETCH="$HOME/.config/hypr/scripts/fetch-wallpaper.sh"
 
+# Under niri-session the awww-daemon user unit is up before this runs. A bare
+# `niri` started from a login shell has no systemd session target, so the daemon
+# would never appear: the wallpaper stayed unpainted and every `awww img` failed
+# silently. Start it ourselves when nothing answers `awww query`.
+if ! awww query &>/dev/null; then
+    setsid awww-daemon >/dev/null 2>&1 &
+fi
+
 # Wait for awww daemon
 for _ in $(seq 1 40); do
     awww query &>/dev/null && break

@@ -16,7 +16,6 @@ end = [
   "notifications",
   "clipboard",
   "group:g1",
-  "cleboost/hotspot:toggle",
   "brightness",
   "battery",
   "control-center",

@@ -1,0 +1,13 @@
+[Unit]
+Description=Lock the session with swaylock when logind prepares to sleep
+After=graphical-session.target
+PartOf=graphical-session.target
+
+[Service]
+Type=simple
+ExecStart=%h/.local/bin/lock-on-sleep-watch.sh
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=graphical-session.target

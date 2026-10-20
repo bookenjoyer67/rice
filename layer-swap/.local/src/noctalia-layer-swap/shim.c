@@ -78,6 +78,28 @@ static int g_count = 0;
 
 static int g_enabled = 1;
 static int g_dry = 0;
+
+/* Resolve the next definition of a wayland symbol.
+ *
+ * dlsym(RTLD_NEXT, ...) only works when libwayland-client is already after us in
+ * the link map. Toolkits that dlopen() wayland (kitty/glfw do) break that: the
+ * lookup returns NULL and the hook either calls a null pointer or reports a fake
+ * success. Fall back to the handle of the already-loaded library. */
+static void *resolve_next(const char *sym)
+{
+    void *p = dlsym(RTLD_NEXT, sym);
+    void *h;
+
+    if (p)
+        return p;
+    h = dlopen("libwayland-client.so.0", RTLD_LAZY | RTLD_NOLOAD);
+    if (!h)
+        h = dlopen("libwayland-client.so.0", RTLD_LAZY | RTLD_GLOBAL);
+    if (!h)
+        return NULL;
+
+    return dlsym(h, sym);
+}
 static volatile int g_pending = 0; /* 0 = nothing, 1 = move to top, 2 = to bottom */
 
 static const char *iface_name(const struct wl_proxy *proxy)
@@ -238,7 +260,13 @@ struct wl_proxy *wl_proxy_marshal_array_flags(struct wl_proxy *proxy, unsigned o
                                               union wl_argument *args)
 {
     if (!real_marshal_array_flags)
-        real_marshal_array_flags = dlsym(RTLD_NEXT, "wl_proxy_marshal_array_flags");
+        real_marshal_array_flags = resolve_next("wl_proxy_marshal_array_flags");
+
+    if (!real_marshal_array_flags)
+        return NULL; /* library is interposed but the real symbol is gone */
+
+    if (!g_enabled)
+        return real_marshal_array_flags(proxy, opcode, interface, version, flags, args);
 
     if (g_enabled && real_marshal_array_flags) {
         const char *name = iface_name(proxy);
@@ -300,17 +328,18 @@ int wl_display_flush(struct wl_display *display)
     static int logged = 0;
 
     if (!real)
-        real = dlsym(RTLD_NEXT, "wl_display_flush");
+        real = resolve_next("wl_display_flush");
+    if (!g_enabled)
+        return real ? real(display) : -1;
     g_real_flush = real;
     g_display = display;
     if (!logged && getenv("NOCTALIA_LAYER_SWAP_DEBUG")) {
         logged = 1;
         fprintf(stderr, "[layer-swap] wl_display_flush hook active\n");
     }
-    if (g_enabled)
-        apply_pending();
+    apply_pending();
 
-    return real ? real(display) : 0;
+    return real ? real(display) : -1;
 }
 
 int wl_display_dispatch(struct wl_display *display)
@@ -318,11 +347,12 @@ int wl_display_dispatch(struct wl_display *display)
     static int (*real)(struct wl_display *) = NULL;
 
     if (!real)
-        real = dlsym(RTLD_NEXT, "wl_display_dispatch");
-    if (g_enabled)
-        apply_pending();
+        real = resolve_next("wl_display_dispatch");
+    if (!g_enabled)
+        return real ? real(display) : -1;
+    apply_pending();
 
-    return real ? real(display) : 0;
+    return real ? real(display) : -1;
 }
 
 /* ---- niri overview watcher -------------------------------------------- */
@@ -391,8 +421,16 @@ __attribute__((constructor)) static void layer_swap_init(void)
         g_enabled = 0;
         return;
     }
-    if (!process_is_target())
+    if (!process_is_target()) {
+        /* LD_PRELOAD is inherited by every app Noctalia launches, so this
+         * library is present in processes it has no business touching. The
+         * symbols stay interposed, but every hook has to behave as a pure
+         * pass-through from here on -- leaving g_enabled at 1 started a
+         * `niri msg event-stream` watcher and ran apply_pending() inside
+         * arbitrary clients, and kitty died in glfwInit. */
+        g_enabled = 0;
         return;
+    }
     if (env && strcmp(env, "log") == 0)
         g_dry = 1;
 

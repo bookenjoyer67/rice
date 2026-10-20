@@ -11,7 +11,7 @@ local function statusPath()
   if ok and type(p) == "string" and p ~= "" then
     return p
   end
-  return (os.getenv("HOME") or "") .. "/.cache/spotport/status.json"
+  return (noctalia.getenv("HOME") or "") .. "/.cache/spotport/status.json"
 end
 
 local function readStatus()

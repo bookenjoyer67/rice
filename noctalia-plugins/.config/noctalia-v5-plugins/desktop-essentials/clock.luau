@@ -10,7 +10,7 @@
 -- Click runs the same calcurse script the old yambar bar clock (and the eww
 -- clock button) opened.
 
-local HOME = os.getenv("HOME") or ""
+local HOME = noctalia.getenv("HOME") or ""
 local CALENDAR = HOME .. "/.local/bin/calendar.sh"
 
 local W, H = 460, 170

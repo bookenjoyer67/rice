@@ -74,6 +74,11 @@ system/            greetd/config.toml      system file, installed with --with-sy
 layer-swap/        .local/src/noctalia-layer-swap   C shim source + Makefile + protocol XML
 local-bin/         .local/bin              lock.sh · make_backdrop.py · calcurse · refresh scripts
 shell/             .zshrc .bashrc .profile .zshenv
+brave/             .config/brave-flags.conf
+session/           .config/environment.d + systemd user units (awww, lock-on-sleep)
+noctalia-state/    settings.toml template (plugin enablement, desktop widgets)
+cursors/           Bibata-Rainbow-Modern.tar.zst, extracted to ~/.icons
+packages.txt  aur-packages.txt   what the installer installs
 starship/  tmux/  nvim/  swaync/  rofi/  waybar/  picom/  polybar/  i3/  xresources/  screenlayout/  revclock/
 ```
 
@@ -110,17 +115,43 @@ Then reload in place (`niri msg action load-config-file`) or log out and back in
 
 ### Dependencies
 
-```bash
-sudo pacman -S niri noctalia matugen awww
-sudo pacman -S kitty cliphist wl-clipboard grim slurp \
-               brightnessctl xwayland-satellite wlsunset \
-               pipewire wireplumber network-manager-applet
-sudo pacman -S swaylock              # lock screen (or AUR: swaylock-effects)
-sudo pacman -S greetd greetd-tuigreet
+`./install.sh` installs everything itself: `packages.txt` (official repos) via
+pacman and `aur-packages.txt` (`brave-origin-bin`) via paru/yay, or makepkg when
+no AUR helper exists. Already-installed packages are skipped, so rerunning is a
+no-op. `--no-deps` links configs only.
+
+```
+./install.sh                 # packages + configs + Noctalia state + shim
+./install.sh --dry-run
+./install.sh --no-deps
+./install.sh --with-system   # /etc/greetd/config.toml (sudo)
 ```
 
-`noctalia` and `awww` are recent packages — older distro packages will not parse
-these configs. This rice was built against the CachyOS `extra-v3` repos.
+The editor config ships with the rice: after linking, `install.sh` runs
+`nvim --headless "+Lazy! sync" +qa`, so the first `nvim` opens with its plugins
+installed instead of an empty plugin manager. Brave Origin gets
+`~/.config/brave-origin-flags.conf` (Wayland + native notifications).
+
+### Brave Origin theme
+
+Brave Origin is themed by Noctalia's community `brave` template, but two things
+in that template assume the regular Brave build. `brave-origin-theme.py`
+(run automatically by `install.sh`) fixes both:
+
+- Brave Origin keeps its profile in `~/.config/BraveSoftware/Brave-Origin`, while
+  the template writes to `Brave-Browser`. A relative symlink bridges them.
+- The theme is an *unpacked* Chromium extension and upstream asks you to
+  "Load unpacked" by hand. The unpacked id is a pure function of the extension
+  path, so the entry is written into `Preferences` directly.
+
+`apply-wallpaper.sh` re-renders just the Brave manifest on every wallpaper change
+(`noctalia theme <image> --scheme vibrant -r ...`) and reinstalls the theme files
+— the full `templates-apply` is still avoided because it rewrites vscode, obsidian
+and other app configs on every swipe. Chromium only re-reads `Preferences` at
+startup, so the palette seed (`browser.theme.user_color`) lands the next time
+Brave is launched; the theme images update immediately. Launch Brave Origin once
+before the first install, or rerun `./install.sh` after its first start, so the
+profile exists.
 
 ---
 

@@ -1,0 +1,3 @@
+# AUR-only packages install.sh installs (needs an AUR helper or base-devel+git).
+# One name per line.
+brave-origin-bin

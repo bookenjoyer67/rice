@@ -47,7 +47,25 @@ if command -v noctalia >/dev/null 2>&1; then
     noctalia msg wallpaper-set "$IMG" >/dev/null 2>&1 || true
 fi
 
-# 5. lockscreen backdrops (swaylock draws a pre-graded image per output; baking it
+# 5. Brave theme (Noctalia community "brave" template). Noctalia only re-renders
+#    community templates on an explicit `templates-apply`, which this rice does
+#    NOT run on every wallpaper change because it also rewrites vscode/obsidian/
+#    neovim configs. Render just the Brave manifest here instead, with the same
+#    scheme the shell uses (settings.toml: wallpaper_scheme), then reinstall the
+#    unpacked theme. Brave itself only re-reads prefs on start, so the seed
+#    (user_color) lands the next time the browser is launched.
+(
+    BRAVE_TPL="$HOME/.local/state/noctalia/community-templates/brave"
+    BRAVE_OUT="$HOME/.cache/noctalia/brave-theme/manifest.json"
+    if command -v noctalia >/dev/null 2>&1 && [ -f "$BRAVE_TPL/manifest.json" ]; then
+        if noctalia theme "$IMG" --scheme "${NOCTALIA_SCHEME:-vibrant}" \
+                -r "$BRAVE_TPL/manifest.json:$BRAVE_OUT" >/dev/null 2>&1; then
+            bash "$BRAVE_TPL/apply.sh" dark >/dev/null 2>&1 || true
+        fi
+    fi
+) &
+
+# 6. lockscreen backdrops (swaylock draws a pre-graded image per output; baking it
 #    here keeps the lock instant instead of grading on the first lock after a change)
 if [ -x "$HOME/.local/bin/refresh-lock-backdrops.sh" ]; then
     "$HOME/.local/bin/refresh-lock-backdrops.sh" >/dev/null 2>&1 &

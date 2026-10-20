@@ -5,7 +5,7 @@
 -- silently. Click opens the Noctalia control-center weather tab (same action
 -- the eww weather button used).
 
-local HOME = os.getenv("HOME") or ""
+local HOME = noctalia.getenv("HOME") or ""
 local SCRIPT = HOME .. "/.local/bin/weather.sh"
 local FONT   = "MesloLGL Nerd Font Mono" -- the script emits a Nerd Font glyph
 local REFRESH_SECONDS = 900
