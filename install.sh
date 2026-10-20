@@ -498,8 +498,24 @@ if [ "$SYSTEM" -eq 1 ]; then
   # tuigreet runs as the `greeter` user, whose HOME is / — it therefore never
   # reads ~/.config/tuigreet and only loads the system path. Without this copy a
   # fresh box gets the stock greeter: no theme colours, no title, no matrix rain.
-  say "Installing /etc/tuigreet/config.toml (sudo)"
-  run sudo install -D -m 644 "$REPO/tuigreet/.config/tuigreet/config.toml" /etc/tuigreet/config.toml
+  # The title and the pre-filled username are host state, so render them here
+  # instead of shipping "cachyos" / "computing" to every machine.
+  TUI_SRC="$REPO/tuigreet/.config/tuigreet/config.toml"
+  tui_title="$( . /etc/os-release 2>/dev/null; printf '%s' "${ID:-linux}" )"
+  tui_user="${SUDO_USER:-${USER:-}}"
+  [ "$tui_user" = root ] && tui_user=""
+  tui_tmp="$(mktemp)"
+  if [ -n "$tui_user" ]; then
+    tui_user_line="default_user = \"$tui_user\""
+  else
+    tui_user_line="# default_user unset (run --with-system via sudo from your user)"
+  fi
+  sed -e "s|^default_user = .*|$tui_user_line|" \
+      -e "s|^custom_title = .*|custom_title = \"$tui_title\"|" \
+      "$TUI_SRC" > "$tui_tmp"
+  say "Installing /etc/tuigreet/config.toml (sudo, title=\"$tui_title\", user=\"${tui_user:-<none>}\")"
+  run sudo install -D -m 644 "$tui_tmp" /etc/tuigreet/config.toml
+  rm -f "$tui_tmp"
   say "  Check what the greeter will actually load:"
   say "    sudo -u greeter env HOME=/ tuigreet --dump-config | grep -A2 '\\[background\\]'"
   say "  Enable the greeter:  sudo systemctl enable --now greetd"

@@ -259,8 +259,11 @@ If you copy this rather than install it, change these first:
   `cx`, `cy`) keep the recorded machine's geometry — the editor fixes those.
 - **tuigreet theme.** tuigreet runs as user `greeter`, whose `HOME` is `/`, so it
   never reads `~/.config/tuigreet`. The theme, title and the matrix background
-  only load from `/etc/tuigreet/config.toml` — `install.sh --with-system` installs
-  it. Verify with
+  only load from `/etc/tuigreet/config.toml` — `install.sh --with-system` renders
+  it from `tuigreet/.config/tuigreet/config.toml`, filling in `custom_title` from
+  the distro id in `/etc/os-release` and `default_user` from the user running the
+  script (`sudo`-aware), since the shipped copy says "cachyos" / "computing".
+  Verify with
   `sudo -u greeter env HOME=/ tuigreet --dump-config | grep -A2 '\[background\]'`.
 - **`spawn-at-startup` display helpers.** `wallpaper-hotplug.sh` and
   `start-wallpaper-one.sh` assume the two-output layout.
