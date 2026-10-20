@@ -138,6 +138,13 @@ plain PS1 if it is missing) with `starship.toml`, and `fastfetch` runs on
 interactive login shells using `fastfetch/config.jsonc` — rendered by the
 installer because its kitty-direct logo needs an absolute path.
 
+Terminals: kitty runs `fish`, and `fish/.config/fish/conf.d/rice.fish` adds the
+starship prompt plus a `fish_greeting` that prints fastfetch, so every new
+terminal opens with the fetch. conf.d is used so an existing
+`~/.config/fish/config.fish` is never replaced. Fonts: `ttf-cascadia-code-nerd`
+(kitty's CaskaydiaCove Nerd Font Mono) and `ttf-meslo-nerd` (Noctalia widgets)
+are installed, and `install.sh` reports whether each family actually resolves.
+
 ### Brave Origin theme
 
 Brave Origin is themed by Noctalia's community `brave` template, but two things

@@ -280,6 +280,23 @@ else
   say "  missing   fastfetch/config.jsonc"
 fi
 
+# --- fonts ------------------------------------------------------------------
+# The terminal font is a Nerd Font; kitty silently falls back to whatever
+# fontconfig picks if the family is missing, which looks like a broken rice.
+say ""
+say "Fonts"
+if command -v fc-match >/dev/null 2>&1; then
+  for fam in "CaskaydiaCove Nerd Font Mono" "MesloLGL Nerd Font Mono"; do
+    got="$(fc-match -f '%{family}' "$fam" 2>/dev/null | head -n1)"
+    case "$got" in
+      *"$fam"*) say "  ok        $fam" ;;
+      *) say "  MISSING   $fam (resolves to '${got:-nothing}') — pacman -S ttf-cascadia-code-nerd ttf-meslo-nerd" ;;
+    esac
+  done
+else
+  say "  skip      fontconfig not installed yet"
+fi
+
 # --- Noctalia state ---------------------------------------------------------
 # The shell's effective config lives in ~/.local/state/noctalia/settings.toml and
 # loads AFTER ~/.config/noctalia/bar.toml. It is where plugin enablement, the
