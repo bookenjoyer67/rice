@@ -8,7 +8,33 @@ local CACHE_ROOT = noctalia.expandPath(XDG_CACHE and XDG_CACHE ~= "" and XDG_CAC
 
 local EXPO = {}
 
-EXPO.KEY = "REDACTED-GOOGLE-API-KEY"
+-- The InnerTube API key is a SECRET and must never live in this repo.
+-- Resolution order:
+--   1. environment variable  YT_MUSIC_KEY
+--   2. key file              ~/.local/share/yt-music/key  (chmod 600, outside the repo)
+-- Fails loudly (notification + error) when neither is present.
+local KEY_ENV = "YT_MUSIC_KEY"
+local KEY_FILE = noctalia.expandPath("~/.local/share/yt-music/key")
+
+local function load_key(): string
+	local k: string? = noctalia.getenv(KEY_ENV)
+	if k ~= nil and k ~= "" then
+		return k
+	end
+	if noctalia.fileExists(KEY_FILE) then
+		local raw = noctalia.readFile(KEY_FILE)
+		if raw then
+			local trimmed = string.gsub(raw, "%s+$", "")
+			if trimmed ~= "" then
+				return trimmed
+			end
+		end
+	end
+	pcall(noctalia.notify, "YouTube Music", "Missing API key: set YT_MUSIC_KEY or ~/.local/share/yt-music/key")
+	error("yt-music: no API key. Set " .. KEY_ENV .. " or write ~/.local/share/yt-music/key (chmod 600) - never commit it.", 0)
+end
+
+EXPO.KEY = load_key()
 EXPO.CLIENT_VERSION = "1.20240813.01.00"
 EXPO.BASE = "https://music.youtube.com/youtubei/v1/"
 EXPO.ORIGIN = "https://music.youtube.com"
