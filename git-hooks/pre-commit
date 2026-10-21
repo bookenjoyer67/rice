@@ -1,0 +1,68 @@
+#!/usr/bin/env bash
+# Pre-commit guard: refuse commits that contain credential literals.
+#
+# Enable per clone (hooks are not versioned, so point git at this directory):
+#   git config core.hooksPath git-hooks
+#
+# Bypass ONLY for a verified false positive:
+#   SKIP_SECRET_SCAN=1 git commit ...
+#
+# Why this exists: a Google API key was committed to api/constants.luau in the
+# yt-music plugin and stayed in history for 18 commits. Secrets belong in the
+# environment or a 0600 file outside the repo, never in a tracked file.
+
+set -uo pipefail
+[ "${SKIP_SECRET_SCAN:-0}" = "1" ] && exit 0
+cd "$(git rev-parse --show-toplevel)" 2>/dev/null || exit 0
+
+patterns=(
+  'AIza[0-9A-Za-z_-]{35}'                 # Google API key
+  'GOCSPX-[A-Za-z0-9_-]{20,}'             # Google OAuth client secret
+  'ya29\.[0-9A-Za-z_-]{20,}'              # Google OAuth access token
+  'gh[pousr]_[0-9A-Za-z]{30,}'            # GitHub token
+  'github_pat_[0-9A-Za-z_]{40,}'          # GitHub fine-grained PAT
+  'AKIA[0-9A-Z]{16}'                      # AWS access key id
+  'ASIA[0-9A-Z]{16}'                      # AWS temporary key id
+  'xox[abprs]-[0-9A-Za-z-]{10,}'          # Slack token
+  'sk-[A-Za-z0-9_-]{24,}'                 # OpenAI/Anthropic style key
+  'npm_[A-Za-z0-9]{36}'                   # npm token
+  'syt_[A-Za-z0-9_]{20,}'                 # Discord token
+  '-----BEGIN [A-Z ]*PRIVATE KEY-----'    # private key block
+  '#HttpOnly_'                            # Netscape cookie jar (browser session)
+  $'^\\.?youtube\\.com\tTRUE'             # Netscape cookie row for YouTube
+)
+
+# Values that look like secrets but are documentation placeholders.
+allow='REDACTED|[Yy]our[_-]?[A-Za-z]*[Kk]ey|example|placeholder|xxxx|CHANGEME|<[^>]+>'
+
+fail=0
+while IFS= read -r -d '' f; do
+  # the guard's own source necessarily contains the patterns it looks for
+  case "$f" in git-hooks/*) continue ;; esac
+  git diff --cached --numstat -- "$f" 2>/dev/null | grep -q '^-' && continue   # binary
+  content=$(git show ":$f" 2>/dev/null) || continue
+  for p in "${patterns[@]}"; do
+    hit=$(printf '%s\n' "$content" | grep -nE -m1 -- "$p" 2>/dev/null)
+    [ -n "$hit" ] || continue
+    ln=${hit%%:*}
+    line=$(printf '%s\n' "$content" | sed -n "${ln}p")
+    printf '%s\n' "$line" | grep -qE -- "$allow" && continue
+    redacted=$(printf '%s' "$line" | sed -E 's/([A-Za-z0-9_-]{6})[A-Za-z0-9_-]{10,}/\1…/g')
+    printf '\n!! refusing commit: credential literal\n   file: %s\n   line: %s\n   text: %s\n   rule: %s\n' \
+      "$f" "$ln" "$redacted" "$p"
+    fail=1
+  done
+done < <(git diff --cached --name-only --diff-filter=ACMR -z)
+
+if [ "$fail" -ne 0 ]; then
+  cat <<'EOF'
+
+Move the value out of the repo instead of committing it:
+  - environment variable, or
+  - a 0600 file outside the tree (e.g. ~/.local/share/<app>/key), or
+  - a gitignored .env that is never staged.
+If this is a confirmed false positive: SKIP_SECRET_SCAN=1 git commit ...
+EOF
+  exit 1
+fi
+exit 0
