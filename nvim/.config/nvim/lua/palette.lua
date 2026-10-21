@@ -7,21 +7,21 @@
 -- below is a light Material role (on_surface*/accent), never a dark *_container
 -- role, which would be unreadable on the dark background.
 return {
-  base00 = "#161217",             -- background
-  base01 = "#1f1a1f",
-  base02 = "#231e23",   -- cursorline / selection
-  base03 = "#978e97",             -- dim accents (line numbers, delimiters)
-  base04 = "#cec3cd",  -- secondary text
-  base05 = "#e9e0e7",          -- primary text
-  base06 = "#e9e0e7",
-  base07 = "#e9e0e7",
+  base00 = "#141218",             -- background
+  base01 = "#1d1b20",
+  base02 = "#211f24",   -- cursorline / selection
+  base03 = "#948f99",             -- dim accents (line numbers, delimiters)
+  base04 = "#cac4cf",  -- secondary text
+  base05 = "#e6e0e9",          -- primary text
+  base06 = "#e6e0e9",
+  base07 = "#e6e0e9",
   base08 = "#ffb4ab",
-  base09 = "#f5b7b5",
-  base0A = "#d4c0d7",
-  base0B = "#f5b7b5",
-  base0C = "#d4c0d7",
-  base0D = "#e4b7f3",
+  base09 = "#efb8c8",
+  base0A = "#ccc2db",
+  base0B = "#efb8c8",
+  base0C = "#ccc2db",
+  base0D = "#cfbdfe",
   base0E = "#ffb4ab",
-  base0F = "#d4c0d7",
-  comment = "#cec3cd", -- legible comment colour
+  base0F = "#ccc2db",
+  comment = "#cac4cf", -- legible comment colour
 }

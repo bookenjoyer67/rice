@@ -81,7 +81,9 @@ is_container() {
   case "$1" in
     "$HOME"|"$HOME/.config"|"$HOME/.local"|"$HOME/.local/bin"|\
     "$HOME/.local/src"|"$HOME/.local/share"|"$HOME/.config/systemd"|\
-    "$HOME/.config/systemd/user"|"$HOME/.config/environment.d") return 0 ;;
+    "$HOME/.config/systemd/user"|"$HOME/.config/environment.d"|\
+    "$HOME/.config/fish"|"$HOME/.config/fish/conf.d"|"$HOME/.config/fish/functions"|\
+    "$HOME/.config/fish/completions"|"$HOME/.config/fish/themes") return 0 ;;
     *) return 1 ;;
   esac
 }

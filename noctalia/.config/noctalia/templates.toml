@@ -1,3 +1,13 @@
+# Noctalia user template: GTK4 / libadwaita palette.
+# Nautilus 51 is GTK4 + libadwaita, so gtk-theme-name is ignored for it; this
+# renders the shell's resolved palette into ~/.config/gtk-4.0/gtk.css (loaded
+# after the theme), giving it the same surfaces/accents as the bar and panels.
+# GTK4 only re-reads gtk.css when an app starts, so no post_hook: open windows
+# recolor on next launch.
+[theme.templates.user.gtk4]
+input_path = "$XDG_CONFIG_HOME/noctalia/templates/gtk4-colors.css"
+output_path = "$XDG_CONFIG_HOME/gtk-4.0/gtk.css"
+
 # Noctalia user template: drive niri's focus-ring ("selection ring") gradient from
 # the shell's resolved palette, so the ring matches the bar/panels and recolours
 # with every wallpaper. Emits a KDL fragment that config.kdl includes, then

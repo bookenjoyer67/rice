@@ -8,7 +8,7 @@
 order = ["default"]
 
 [bar.default]
-start = ["launcher", "wallpaper", "computing/theme-refresh:button", "workspaces", "teagar/niri-workspace-preview:preview", "nathan/catwalk:cat", "aabidk20/yt-music:widget"]
+start = ["launcher", "computing/wallpaper-browser:button", "computing/theme-refresh:button", "workspaces", "teagar/niri-workspace-preview:preview", "nathan/catwalk:cat", "aabidk20/yt-music:widget"]
 center = ["clock"]
 end = [
   "media",
@@ -35,7 +35,7 @@ widget_spacing = 8
 [bar.default.monitor."HDMI-A-1"]
 scale = 1.25
 thickness = 22
-start = ["launcher", "wallpaper", "computing/theme-refresh:button", "workspaces", "teagar/niri-workspace-preview:preview", "aabidk20/yt-music:widget"]
+start = ["launcher", "computing/wallpaper-browser:button", "computing/theme-refresh:button", "workspaces", "teagar/niri-workspace-preview:preview", "aabidk20/yt-music:widget"]
 end = [
   "media",
   "tray",

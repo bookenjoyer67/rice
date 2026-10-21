@@ -283,6 +283,37 @@ window-rule {
     match is-active=false
     opacity 0.95
 }
+// Nautilus: transparency lives in the APP's CSS, not here. niri's window
+// `opacity` fades the ENTIRE surface (text, icons, sidebar included), which is
+// not what we want — so this rule stays at full opacity and only supplies the
+// frosted blur. The see-through background is painted by
+// ~/.config/gtk-4.0/gtk.css (rendered from the Noctalia gtk4 template): window
+// base + file-view backdrop are transparent, headerbar/sidebar/text/icons are
+// their own opaque paint. draw-border-with-background false keeps the focus
+// ring an outline instead of a solid fill behind the glass.
+window-rule {
+    match app-id="^org.gnome.Nautilus$"
+    // cancel the global `is-active=false opacity 0.95` dim so unfocused looks
+    // exactly like focused
+    opacity 1.0
+    geometry-corner-radius 12
+    draw-border-with-background false
+    // Shadow back ON at global strength, drawing behind the window like kitty
+    // does, but with kitty's TRANSLUCENT colour (#421f4466) instead of the
+    // global opaque #421f — so it reads as a soft shadow through the glass
+    // rather than a solid red panel.
+    shadow {
+        on
+        softness 38
+        spread 7
+        offset x=0 y=5
+        color "#421f4477"
+        draw-behind-window true
+    }
+    background-effect {
+        blur true
+    }
+}
 // Inactive kitty: slightly more transparent + frosted than the global inactive rule.
 // Must come AFTER the rule above (later rules override earlier); app-id + is-active
 // share one match line so they AND, not OR.

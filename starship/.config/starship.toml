@@ -1,0 +1,109 @@
+"$schema" = 'https://starship.rs/config-schema.json'
+
+# Divine Machinery — starship prompt
+# Circular pill segments: every module draws its own  caps + bg, so the
+# chain can NEVER break no matter which modules are present.
+# Void + hot pink hero, gold, crimson, circuit green, ethereal cyan,
+# byzantine purple, amber.
+
+format = "[💻](fg:hotpink) $username $directory $git_branch $git_status $cmd_duration $status $nodejs $rust $python $c $golang $php $java $kotlin $docker_context $time$line_break$character"
+
+palette = 'divine-machinery'
+
+[palettes.divine-machinery]
+hotpink   = "#FF1493"  # sacred heart, hero
+gold      = "#FFD700"  # Byzantine traces, halos
+crimson   = "#8B0000"  # sacrificial deep red
+red       = "#FF1744"  # bright fail
+green     = "#39FF14"  # circuit green
+cyan      = "#00FFFF"  # ethereal fiber
+purple    = "#BF5FFF"  # byzantine substrate
+amber     = "#FF8C00"  # temple flame, warning LED
+parchment = "#E8E0D0"  # scripture text
+void      = "#0A0A0F"  # the void
+white     = "#FFFFFF"
+black     = "#0A0A0F"  # alias -> void
+
+[os]
+disabled = true
+
+# HERO — white on hot pink
+[username]
+show_always = true
+format = '[](fg:hotpink)[ 👤 $user ](fg:white bg:hotpink)[](fg:hotpink)'
+
+# PATH — parchment on void
+[directory]
+truncation_length = 5
+truncation_symbol = "../"
+format = '[](fg:black)[ 📁 $path ](fg:parchment bg:black)[](fg:black)'
+
+# BRANCH — black on gold (Byzantine trace)
+[git_branch]
+symbol = ""
+format = '[](fg:gold)[ $symbol $branch ](fg:black bg:gold)[](fg:gold)'
+
+# DIRTY STATE — white on crimson
+[git_status]
+format = '[](fg:crimson)[ $all_status$ahead_behind ](fg:white bg:crimson)[](fg:crimson)'
+
+[cmd_duration]
+min_time = 2000
+format = '[](fg:black)[ 🕓 $duration ](fg:gold bg:black)[](fg:black)'
+
+[status]
+disabled = false
+symbol = "✖"
+format = '[](fg:red)[ $symbol $status ](fg:white bg:red)[](fg:red)'
+pipestatus = true
+pipestatus_format = '[](fg:red)[ $symbol $pipestatus ](fg:white bg:red)[](fg:red)'
+
+# LANGS — circuit green / amber / ethereal cyan / byzantine purple
+[nodejs]
+symbol = ""
+format = '[](fg:green)[ $symbol $version ](fg:black bg:green)[](fg:green)'
+
+[rust]
+symbol = ""
+format = '[](fg:amber)[ $symbol $version ](fg:black bg:amber)[](fg:amber)'
+
+[python]
+symbol = ""
+format = '[](fg:cyan)[ $symbol $version ](fg:black bg:cyan)[](fg:cyan)'
+
+[c]
+symbol = ""
+format = '[](fg:purple)[ $symbol $version ](fg:black bg:purple)[](fg:purple)'
+
+[golang]
+symbol = ""
+format = '[](fg:cyan)[ $symbol $version ](fg:black bg:cyan)[](fg:cyan)'
+
+[php]
+symbol = ""
+format = '[](fg:hotpink)[ $symbol $version ](fg:white bg:hotpink)[](fg:hotpink)'
+
+[java]
+symbol = ""
+format = '[](fg:crimson)[ $symbol $version ](fg:white bg:crimson)[](fg:crimson)'
+
+[kotlin]
+symbol = ""
+format = '[](fg:purple)[ $symbol $version ](fg:black bg:purple)[](fg:purple)'
+
+[docker_context]
+symbol = ""
+format = '[](fg:black)[ $symbol $context ](fg:cyan bg:black)[](fg:black)'
+
+# CLOCK — black on gold halo
+[time]
+disabled = false
+time_format = "%H:%M"
+format = '[](fg:gold)[ 🕰 $time ](fg:black bg:gold)[](fg:gold)'
+
+[line_break]
+disabled = false
+
+[character]
+success_symbol = '[>](bold fg:hotpink)'
+error_symbol = '[>](bold fg:red)'

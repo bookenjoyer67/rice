@@ -120,9 +120,37 @@ BRAVE_THEME="$HOME/.local/share/noctalia/brave-theme"
 BRAVE_APPLY="$HOME/.local/state/noctalia/community-templates/brave/apply.sh"
 BRAVE_LOG="$HOME/.cache/noctalia/brave-theme-apply.log"
 
-brave_running() {
-    pgrep -u "$UID" -x brave >/dev/null 2>&1 || pgrep -u "$UID" -x brave-browser >/dev/null 2>&1
+# Brave Origin is a separate profile AND a separate binary, but its process is
+# also named "brave", so it must be told apart by the real executable path.
+BRO_DIR="$HOME/.config/BraveSoftware/Brave-Origin"
+BRO_PREFS="$BRO_DIR/Default/Preferences"
+BRO_THEME="$HOME/.local/share/noctalia/brave-origin-theme"
+BRO_APPLY="$HOME/.local/state/noctalia/community-templates/brave-origin/apply.sh"
+BRO_TMPL="$HOME/.local/state/noctalia/community-templates/brave-origin/manifest.json"
+BRO_CACHE="$HOME/.cache/noctalia/brave-origin-theme/manifest.json"
+
+# Chromium family, matched by executable path: "brave" owns /opt/brave-bin,
+# Brave Origin owns /opt/brave-origin-bin. Both binaries are literally named
+# brave, so `pgrep -x brave` matches either browser and cannot be trusted.
+browser_pids() {
+    local kind="$1" d pid exe
+    for d in /proc/[0-9]*; do
+        pid="${d#/proc/}"
+        [ -O "$d" ] || continue
+        exe="$(readlink -f "$d/exe" 2>/dev/null)" || continue
+        case "$kind:$exe" in
+            brave:*/brave-bin/*)  printf '%s\n' "$pid" ;;
+            origin:*/brave-origin-bin/*) printf '%s\n' "$pid" ;;
+        esac
+    done
 }
+
+browser_alive() {
+    [ -n "$(browser_pids "$1")" ]
+}
+
+brave_running() { browser_alive brave; }
+origin_running() { browser_alive origin; }
 
 # Chromium compiles the unpacked theme into "Cached Theme.pak" inside the theme
 # directory and serves THAT at startup; editing manifest.json/images does
@@ -133,9 +161,10 @@ clear_theme_cache() {
     rm -f "$BRAVE_THEME/Cached Theme.pak"
 }
 
-brave_theme_loaded() {
-    [ -f "$BRAVE_PREFS" ] || return 1
-    python3 - "$BRAVE_PREFS" "$BRAVE_THEME" >/dev/null 2>&1 <<'PY'
+theme_loaded_in() {
+    local prefs="$1" dir="$2"
+    [ -f "$prefs" ] || return 1
+    python3 - "$prefs" "$dir" >/dev/null 2>&1 <<'PY'
 import json, sys
 from pathlib import Path
 
@@ -157,9 +186,12 @@ raise SystemExit(1)
 PY
 }
 
-# The rendered Brave manifest's accent must be the palette primary.
-brave_manifest_in_sync() {
-    local manifest="$BRAVE_THEME/manifest.json"
+brave_theme_loaded()  { theme_loaded_in "$BRAVE_PREFS" "$BRAVE_THEME"; }
+origin_theme_loaded() { theme_loaded_in "$BRO_PREFS" "$BRO_THEME"; }
+
+# The rendered manifest's accent must be the palette primary.
+manifest_in_sync() {
+    local manifest="$1"
     [ -n "$EXPECTED" ] && [ -f "$manifest" ] || return 0
     python3 - "$manifest" "$EXPECTED" >/dev/null 2>&1 <<'PY'
 import json, sys
@@ -174,9 +206,13 @@ raise SystemExit(0 if ("%02x%02x%02x" % tuple(int(c) for c in accent[:3])) == wa
 PY
 }
 
+brave_manifest_in_sync() { manifest_in_sync "$BRAVE_THEME/manifest.json"; }
+
 BRAVE_MSG=""
+mkdir -p "$(dirname "$BRAVE_LOG")"
+
+# --- palette files, per browser: each pack writes only into its own profile ---
 if [ -x "$BRAVE_APPLY" ] && [ -d "$BRAVE_DIR" ]; then
-    mkdir -p "$(dirname "$BRAVE_LOG")"
     brave_running || clear_theme_cache
     bash "$BRAVE_APPLY" "$MODE" >>"$BRAVE_LOG" 2>&1 || log "theme-refresh: Brave theme apply failed (see $BRAVE_LOG)" >&2
 
@@ -187,45 +223,86 @@ if [ -x "$BRAVE_APPLY" ] && [ -d "$BRAVE_DIR" ]; then
         noctalia msg templates-apply >/dev/null 2>&1 || true
         bash "$BRAVE_APPLY" "$MODE" >>"$BRAVE_LOG" 2>&1 || true
     done
+fi
 
-    if ! brave_theme_loaded; then
-        BRAVE_MSG=" Load Brave's theme once: brave://extensions → Developer mode → Load unpacked → $BRAVE_THEME — then restart Brave."
-    elif [ "${RESTART_BRAVE:-0}" = "1" ] && brave_running; then
-        # Chromium only reads a theme extension at startup, so a live palette
-        # change needs Brave to restart. Do it gracefully and force session
-        # restore; write the Preferences while it is closed, then relaunch.
-        log "theme-refresh: restarting Brave for the new palette"
-        pkill -TERM -u "$UID" -x brave 2>/dev/null || true
-        pkill -TERM -u "$UID" -x brave-browser 2>/dev/null || true
-        for _ in $(seq 1 40); do brave_running || break; sleep 0.5; done
-        if brave_running; then
-            BRAVE_MSG=" Brave did not exit; restart it by hand to apply the palette."
-        else
-            sleep 1
-            clear_theme_cache
-            bash "$BRAVE_APPLY" "$MODE" >>"$BRAVE_LOG" 2>&1
-            setsid nohup /usr/bin/brave --restore-last-session >/dev/null 2>&1 &
-            sleep 3
-            if brave_running; then
-                BRAVE_MSG=" Brave restarted with the new palette."
-            else
-                BRAVE_MSG=" Brave was closed but did not relaunch — start it again by hand."
-            fi
-        fi
-    elif brave_running; then
-        # Chromium writes Preferences on quit, so a live write would be lost.
-        # Queue a one-shot palette sync for when Brave exits.
-        (
-            flock -n 9 || exit 0
-            while brave_running; do sleep 2; done
-            sleep 2
-            clear_theme_cache
-            bash "$BRAVE_APPLY" "$MODE" >>"$BRAVE_LOG" 2>&1
-        ) 9>"$HOME/.cache/noctalia/brave-theme-sync.lock" >/dev/null 2>&1 &
-        BRAVE_MSG=" Restart Brave to apply it (or click the refresh button)."
-    else
-        BRAVE_MSG=" Brave opens with it next launch."
+# Brave Origin is not in settings.toml's community_ids, so templates-apply does
+# not render it; render this one manifest explicitly from the same palette.
+if [ -x "$BRO_APPLY" ] && [ -d "$BRO_DIR" ]; then
+    mkdir -p "$(dirname "$BRO_CACHE")"
+    noctalia theme "$SUB" --scheme "$SCHEME" "$CLI_MODE" -r "$BRO_TMPL:$BRO_CACHE" >/dev/null 2>&1 \
+        || log "theme-refresh: Brave Origin manifest render failed" >&2
+    origin_running || rm -f "$BRO_THEME/Cached Theme.pak"
+    bash "$BRO_APPLY" "$MODE" >>"$BRAVE_LOG" 2>&1 \
+        || log "theme-refresh: Brave Origin theme apply failed (see $BRAVE_LOG)" >&2
+fi
+
+browser_label() {
+    case "$1" in
+        brave)  printf 'Brave' ;;
+        origin) printf 'Brave Origin' ;;
+    esac
+}
+
+# Chromium only reads a theme extension at startup, so a live palette change
+# needs the browser to restart. Restart ONE browser at a time, only if it is
+# actually up, and relaunch the same one with session restore.
+restart_one() {
+    local kind="$1" launch="$2" apply="$3" theme="$4" name pids
+    name="$(browser_label "$kind")"
+    pids="$(browser_pids "$kind")"
+    [ -n "$pids" ] || return 0
+    log "theme-refresh: restarting $name for the new palette"
+    kill -TERM $pids 2>/dev/null || true
+    for _ in $(seq 1 40); do
+        browser_alive "$kind" || break
+        sleep 0.5
+    done
+    if browser_alive "$kind"; then
+        BRAVE_MSG="$BRAVE_MSG $name did not exit; restart it by hand to apply the palette."
+        return 0
     fi
+    sleep 1
+    rm -f "$theme/Cached Theme.pak"
+    if [ -x "$apply" ]; then
+        bash "$apply" "$MODE" >>"$BRAVE_LOG" 2>&1 || true
+    fi
+    setsid nohup "$launch" --restore-last-session >/dev/null 2>&1 &
+    sleep 3
+    if browser_alive "$kind"; then
+        BRAVE_MSG="$BRAVE_MSG $name restarted with the new palette."
+    else
+        BRAVE_MSG="$BRAVE_MSG $name was closed but did not relaunch — start it again by hand."
+    fi
+}
+
+if [ "${RESTART_BRAVE:-0}" = "1" ] && { brave_running || origin_running; }; then
+    if brave_running; then
+        restart_one brave /usr/bin/brave "$BRAVE_APPLY" "$BRAVE_THEME"
+    fi
+    if origin_running; then
+        restart_one origin /usr/bin/brave-origin "$BRO_APPLY" "$BRO_THEME"
+    fi
+else
+    # No restart requested (or nothing running): report per running browser.
+    for kind in brave origin; do
+        browser_alive "$kind" || continue
+        name="$(browser_label "$kind")"
+        case "$kind" in
+            brave)  theme_dir="$BRAVE_THEME"; scheme_url='brave://extensions' ;;
+            origin) theme_dir="$BRO_THEME";   scheme_url='brave://extensions' ;;
+        esac
+        if [ "$kind" = brave ]; then
+            loaded=0; brave_theme_loaded || loaded=1
+        else
+            loaded=0; origin_theme_loaded || loaded=1
+        fi
+        if [ "$loaded" = 1 ]; then
+            BRAVE_MSG="$BRAVE_MSG Load $name's theme once: $scheme_url → Developer mode → Load unpacked → $theme_dir — then restart $name."
+        else
+            BRAVE_MSG="$BRAVE_MSG Restart $name to apply it (or click the refresh button)."
+        fi
+    done
+    [ -n "$BRAVE_MSG" ] || BRAVE_MSG=" Brave opens with it next launch."
 fi
 
 # 6. lockscreen backdrops (pre-graded per output)

@@ -1,0 +1,42 @@
+id = "computing/recording-indicator"
+name = "Recording Indicator"
+version = "1.0.0"
+plugin_api = 30
+author = "computing"
+license = "MIT"
+icon = "player-record"
+description = "A pulsing REC dot on the bar that only appears while a screen recording is running, with elapsed time and one-click stop."
+tags = ["bar", "recording", "utility"]
+dependencies = ["bash", "pgrep", "readlink"]
+
+[[widget]]
+id = "indicator"
+entry = "widget.luau"
+
+  [[widget.setting]]
+  key = "hide_when_idle"
+  type = "bool"
+  label_key = "settings.hide_when_idle.label"
+  description_key = "settings.hide_when_idle.description"
+  default = true
+
+  [[widget.setting]]
+  key = "show_elapsed"
+  type = "bool"
+  label_key = "settings.show_elapsed.label"
+  description_key = "settings.show_elapsed.description"
+  default = true
+
+  [[widget.setting]]
+  key = "blink"
+  type = "bool"
+  label_key = "settings.blink.label"
+  description_key = "settings.blink.description"
+  default = true
+
+  [[widget.setting]]
+  key = "stop_on_click"
+  type = "bool"
+  label_key = "settings.stop_on_click.label"
+  description_key = "settings.stop_on_click.description"
+  default = true

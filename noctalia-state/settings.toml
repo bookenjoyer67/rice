@@ -15,6 +15,7 @@ capsule_thickness = 0.9499999824911356
 center = [ "clock" ]
 contact_shadow = true
 end = [
+    "computing/recording-indicator:indicator",
     "tray",
     "notifications",
     "clipboard",
@@ -30,7 +31,7 @@ margin_ends = 39
 scale = 1.1000000089406967
 start = [
     "launcher",
-    "wallpaper",
+    "computing/wallpaper-browser:button",
     "computing/theme-refresh:button",
     "workspaces",
     "teagar/niri-workspace-preview:preview",
@@ -40,11 +41,11 @@ start = [
 thickness = 17
 
     [bar.default.monitor.HDMI-A-1]
-    end = [ "tray", "notifications", "group:g1", "control-center", "session" ]
+    end = [ "computing/recording-indicator:indicator", "tray", "notifications", "group:g1", "control-center", "session" ]
     scale = 1.25
     start = [
         "launcher",
-        "wallpaper",
+        "computing/wallpaper-browser:button",
         "computing/theme-refresh:button",
         "workspaces",
         "teagar/niri-workspace-preview:preview",

@@ -14,9 +14,9 @@ layout {
     focus-ring {
         // Active window: primary -> tertiary, the same two accents the shell
         // uses for highlights. 45deg mirrors CSS linear-gradient(45deg, ...).
-        active-gradient from="#bf67e4" to="#cc6684" angle=45
+        active-gradient from="#e47e67" to="#9bdea4" angle=45
         // Unfocused windows (only visible on other outputs): a quiet
         // wallpaper-derived pair so the ring still belongs to the palette.
-        inactive-gradient from="#31143d" to="#6e6074" angle=45
+        inactive-gradient from="#37201b" to="#74645f" angle=45
     }
 }

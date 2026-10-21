@@ -17,6 +17,7 @@
 
 local ROWS = 24
 local POLL_MS = 5000
+local SAMPLE_TIMEOUT_MS = 15000
 
 local function num(v, d)
   local n = tonumber(v)
@@ -185,76 +186,100 @@ local function publish(name, grid)
   noctalia.state.set("grids", grids)
 end
 
+-- shell-quote a path for the one composed magick pipeline
+local function shq(s)
+  return "'" .. tostring(s):gsub("'", "'\\''") .. "'"
+end
+
 local function sample(name, path, x0, y0, x1, y1, out, signature)
-  if sampling[name] then
+  -- The in-flight flag used to be cleared only inside the async callbacks, so a
+  -- callback that died (Luau CPU budget, parse error) left it true forever and
+  -- every later resample returned early with no log line: the bars then kept
+  -- the colour grid of a wallpaper that was no longer on screen. Treat an
+  -- attempt older than SAMPLE_TIMEOUT_MS as dead.
+  local started = sampling[name]
+  if started ~= nil and (noctalia.nowMs() - started) < SAMPLE_TIMEOUT_MS then
     return
   end
-  sampling[name] = true
+  sampling[name] = noctalia.nowMs()
+
+  local function fail(msg)
+    sampling[name] = nil
+    noctalia.log("wallpaper-bars: " .. tostring(msg))
+  end
+
   noctalia.runAsync({ "magick", "identify", "-format", "%w %h", path }, function(res)
-    if res.exitCode ~= 0 then
-      sampling[name] = nil
-      noctalia.log("wallpaper-bars: identify failed for " .. tostring(path) .. ": " .. tostring(res.stderr))
-      return
-    end
-    local iw, ih = tostring(res.stdout):match("(%d+)%s+(%d+)")
-    iw, ih = tonumber(iw), tonumber(ih)
-    if iw == nil or ih == nil or iw < 2 or ih < 2 then
-      sampling[name] = nil
-      return
-    end
-
-    -- cover fit: the wallpaper is scaled to fill the output, then centred
-    local ow, oh = num(out.width, 1920), num(out.height, 1080)
-    local scale = math.max(ow / iw, oh / ih)
-    local dispW, dispH = iw * scale, ih * scale
-    local offX, offY = (dispW - ow) / 2, (dispH - oh) / 2
-
-    local ix0 = (x0 + offX) / scale
-    local ix1 = (x1 + offX) / scale
-    local iy0 = (y0 + offY) / scale
-    local iy1 = (y1 + offY) / scale
-
-    local cx = math.clamp(math.floor(ix0), 0, iw - 1)
-    local cy = math.clamp(math.floor(iy0), 0, ih - 1)
-    local cw = math.clamp(math.ceil(ix1 - ix0), 1, iw - cx)
-    local ch = math.clamp(math.ceil(iy1 - iy0), 1, ih - cy)
-
-    noctalia.runAsync({
-      "magick",
-      path,
-      "-auto-orient",
-      "-crop",
-      tostring(cw) .. "x" .. tostring(ch) .. "+" .. tostring(cx) .. "+" .. tostring(cy),
-      "+repage",
-      "-resize",
-      tostring(bands) .. "x" .. tostring(ROWS) .. "!",
-      "-depth",
-      "8",
-      "txt:-",
-    }, function(res2)
-      sampling[name] = nil
-      if res2.exitCode ~= 0 then
-        noctalia.log("wallpaper-bars: sample failed for " .. tostring(name) .. ": " .. tostring(res2.stderr))
+    sampling[name] = nil
+    local ok, err = pcall(function()
+      if res.exitCode ~= 0 then
+        fail("identify failed for " .. tostring(path) .. ": " .. tostring(res.stderr))
         return
       end
-      local pixels = {}
-      local i = 0
-      for hex in tostring(res2.stdout):gmatch("#(%x%x%x%x%x%x)") do
-        i += 1
-        pixels[i] = tonumber(hex, 16)
-        if i >= bands * ROWS then
-          break
+      local iw, ih = tostring(res.stdout):match("(%d+)%s+(%d+)")
+      iw, ih = tonumber(iw), tonumber(ih)
+      if iw == nil or ih == nil or iw < 2 or ih < 2 then
+        fail("bad image dimensions for " .. tostring(path))
+        return
+      end
+
+      -- cover fit: the wallpaper is scaled to fill the output, then centred
+      local ow, oh = num(out.width, 1920), num(out.height, 1080)
+      local scale = math.max(ow / iw, oh / ih)
+      local dispW, dispH = iw * scale, ih * scale
+      local offX, offY = (dispW - ow) / 2, (dispH - oh) / 2
+
+      local ix0 = (x0 + offX) / scale
+      local ix1 = (x1 + offX) / scale
+      local iy0 = (y0 + offY) / scale
+      local iy1 = (y1 + offY) / scale
+
+      local cx = math.clamp(math.floor(ix0), 0, iw - 1)
+      local cy = math.clamp(math.floor(iy0), 0, ih - 1)
+      local cw = math.clamp(math.ceil(ix1 - ix0), 1, iw - cx)
+      local ch = math.clamp(math.ceil(iy1 - iy0), 1, ih - cy)
+      local crop = tostring(cw) .. "x" .. tostring(ch) .. "+" .. tostring(cx) .. "+" .. tostring(cy)
+
+      -- Reduce to bare hex INSIDE the pipeline: parsing a full `txt:-` dump
+      -- (~40 bytes per pixel) in Luau is what blew the callback CPU budget.
+      -- Output is one line, 6 hex digits per pixel, row-major.
+      local pipeline = string.format(
+        "magick %s -auto-orient -crop %s +repage -resize %dx%d! -depth 8 txt:- "
+          .. "| sed -n 's/.*#\\([0-9A-Fa-f]\\{6\\}\\).*/\\1/p' | tr -d '\\n'",
+        shq(path), crop, bands, ROWS)
+
+      noctalia.runAsync({ "sh", "-c", pipeline }, function(res2)
+        local ok2, err2 = pcall(function()
+          if res2.exitCode ~= 0 then
+            fail("sample failed for " .. tostring(name) .. ": " .. tostring(res2.stderr))
+            return
+          end
+          local str = tostring(res2.stdout)
+          local limit = bands * ROWS
+          local pixels = {}
+          local n = 0
+          for hex in str:gmatch("%x%x%x%x%x%x") do
+            n += 1
+            pixels[n] = tonumber(hex, 16)
+            if n >= limit then
+              break
+            end
+          end
+          if n < limit * 0.5 then
+            fail("short colour grid for " .. tostring(name) .. " (" .. tostring(n) .. "/" .. tostring(limit) .. ")")
+            return
+          end
+          signatures[name] = signature
+          publish(name, { rows = ROWS, cols = bands, w = ow, h = oh, data = pixels })
+          noctalia.log("wallpaper-bars: sampled " .. tostring(name) .. " from " .. tostring(path) .. " crop " .. crop)
+        end)
+        if not ok2 then
+          fail("sample parse failed for " .. tostring(name) .. ": " .. tostring(err2))
         end
-      end
-      if i < bands * ROWS * 0.5 then
-        noctalia.log("wallpaper-bars: short colour grid for " .. tostring(name) .. " (" .. tostring(i) .. ")")
-        return
-      end
-      signatures[name] = signature
-      publish(name, { rows = ROWS, cols = bands, w = ow, h = oh, data = pixels })
-      noctalia.log("wallpaper-bars: sampled " .. tostring(name) .. " from " .. tostring(path) .. " crop "
-        .. tostring(cw) .. "x" .. tostring(ch))
+      end)
     end)
+    if not ok then
+      fail("sample failed for " .. tostring(name) .. ": " .. tostring(err))
+    end
   end)
 end
 
@@ -275,6 +300,8 @@ local function onLine(line)
     noctalia.state.set("levels", vals)
   end
 end
+
+local cavaStartedMs = 0
 
 local function startCava()
   local source = noctalia.getConfig("audio_source") or ""
@@ -297,7 +324,13 @@ local function startCava()
     "source = " .. tostring(source),
   }, "\n")
   noctalia.writeFile(cavaConf, conf)
-  local ok = noctalia.runStream("exec cava -p '" .. cavaConf .. "'", onLine)
+  -- A cava from a previous instance survives a hot reload / plugin bounce; a
+  -- second reader on the same monitor then keeps the widget silent. Replace it
+  -- in the SAME shell as the spawn, so the kill can never land on the new one.
+  local cmd = "exec sh -c \"pkill -f '^cava -p " .. cavaConf .. "' >/dev/null 2>&1; "
+    .. "sleep 0.2; exec cava -p " .. cavaConf .. "\""
+  local ok = noctalia.runStream(cmd, onLine)
+  cavaStartedMs = noctalia.nowMs()
   if not ok then
     noctalia.log("wallpaper-bars: could not start cava")
   end
@@ -327,16 +360,28 @@ local function refresh()
 end
 
 function update()
-  -- cava watchdog: restart if the stream went quiet for too long
-  if lastLineMs ~= 0 and noctalia.nowMs() - lastLineMs > 15000 then
-    lastLineMs = noctalia.nowMs()
+  -- cava watchdog. A stream that never produced a single line counts as dead
+  -- too: `lastLineMs == 0` used to disable the check entirely, so a cava that
+  -- failed to start (or was killed by a previous instance's onExit) stayed
+  -- dead until the shell restarted.
+  local now = noctalia.nowMs()
+  local silentFor
+  if lastLineMs == 0 then
+    silentFor = now - cavaStartedMs
+  else
+    silentFor = now - lastLineMs
+  end
+  if silentFor > 15000 then
+    lastLineMs = now
     startCava()
   end
   refresh()
 end
 
 function onExit()
-  noctalia.runAsync("pkill -f 'cava -p " .. cavaConf .. "'")
+  -- anchored: an unanchored -f pattern also matches a sibling shell whose
+  -- command line merely mentions the conf
+  noctalia.runAsync("pkill -f '^cava -p " .. cavaConf .. "'")
 end
 
 startCava()

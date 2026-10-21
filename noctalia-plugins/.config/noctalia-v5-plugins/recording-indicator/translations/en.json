@@ -1,0 +1,24 @@
+{
+  "settings": {
+    "blink": {
+      "label": "Blink the dot",
+      "description": "Pulse the red dot once per second so it reads as live."
+    },
+    "hide_when_idle": {
+      "label": "Hide when not recording",
+      "description": "Show nothing at all on the bar while no recording is running."
+    },
+    "show_elapsed": {
+      "label": "Show elapsed time",
+      "description": "Print the recording duration next to the REC dot."
+    },
+    "stop_on_click": {
+      "label": "Click stops the recording",
+      "description": "Left-click runs record-screen.sh, which stops the current recording."
+    }
+  },
+  "widget": {
+    "idle": "Not recording",
+    "recording": "Recording"
+  }
+}
