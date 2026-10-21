@@ -6,7 +6,6 @@ local logger = require("../utils/log.luau")
 local log = logger.module("ytapi", "resolve")
 
 local const = require("./constants.luau")
-local COOKIE_PATH = const.COOKIE_PATH
 local STREAMS_CACHE_DIR = const.STREAMS_CACHE_DIR
 local AUDIO_DIR = const.AUDIO_DIR
 
@@ -16,21 +15,27 @@ local get_thumbnail_path = thumbs.get_thumbnail_path
 local types = require("../utils/types.luau")
 local network = require("../utils/network.luau")
 
+-- yt-dlp is not guaranteed to be on noctalia's PATH: the compositor inherits
+-- the systemd user environment, which may omit ~/.local/bin where pip puts it.
+-- Resolve the binary once, preferring the explicit user-local install.
+local YTDLP_BIN = "yt-dlp"
+do
+	local home_bin = noctalia.expandPath("~/.local/bin/yt-dlp")
+	if noctalia.fileExists and noctalia.fileExists(home_bin) then
+		YTDLP_BIN = home_bin
+	end
+end
+
 local function build_resolve_argv(safe_id: string): { string }
 	local argv = {
-		"yt-dlp",
-		"--extractor-args",
-		"youtube:player_client=mweb,web",
+		YTDLP_BIN,
 		"-f",
 		"bestaudio/best",
 		"-g",
 		"--no-playlist",
 		"--no-warnings",
 	}
-	if noctalia.fileExists(COOKIE_PATH) then
-		table.insert(argv, "--cookies")
-		table.insert(argv, COOKIE_PATH)
-	end
+	-- cookie jar intentionally NOT passed: see the note above resolve_stream.
 	table.insert(argv, "https://music.youtube.com/watch?v=" .. safe_id)
 	return argv
 end
@@ -95,11 +100,8 @@ function EXPO.cache_audio(video_id, callback)
 	end
 
 	noctalia.mkdirAll(AUDIO_DIR)
-	local argv = { "yt-dlp", "--extractor-args", "youtube:player_client=mweb,web", "-f", "bestaudio/best", "-o", path }
-	if noctalia.fileExists(COOKIE_PATH) then
-		table.insert(argv, "--cookies")
-		table.insert(argv, COOKIE_PATH)
-	end
+	local argv = { YTDLP_BIN, "-f", "bestaudio/best", "-o", path }
+	-- cookie jar intentionally NOT passed: see the note above resolve_stream.
 	table.insert(argv, "https://music.youtube.com/watch?v=" .. safe_id)
 
 	local launched = network.runAsync(argv, function(res)
@@ -116,6 +118,11 @@ function EXPO.cache_audio(video_id, callback)
 	end
 end
 
+-- Streams are resolved anonymously (no cookie jar). With account cookies the
+-- player request comes back SABR/PO-token-gated with no direct format URLs, so
+-- yt-dlp errors "Requested format is not available" / "page needs to be
+-- reloaded". Guest resolution returns plain googlevideo URLs that mpv plays.
+-- Cookies remain in use for library/metadata via InnerTube + SAPISIDHASH.
 function EXPO.resolve_stream(video_id: string, cb: ((string?) -> ())?)
 	if type(video_id) ~= "string" or video_id == "" then
 		if cb then
