@@ -14,8 +14,6 @@ local Library = {}
 local auditing = false
 local audit_pending = false
 
--- Saved-track metadata persistence (offline_meta.json): standalone
--- downloads keep their title/artist here so restarts stay labeled.
 local meta_loaded = false
 
 function Library.load_offline_meta()
@@ -121,7 +119,6 @@ function Library.note_cached_track(item)
 	}
 	Library.save_cached_meta()
 
-	-- If it's already an explicit download, it belongs in offline_tracks, not cached_tracks
 	if state.offline_meta and state.offline_meta[id] then
 		return
 	end
@@ -203,16 +200,6 @@ function Library.resolve_missing_meta(vids: { string })
 	next_vid()
 end
 
--- One pass over every known playlist cache that simultaneously:
---  1. marks fully-downloaded playlists (downloaded_playlist_ids)
---  2. collects metadata for any track seen in those caches
---  3. classifies leftover locally-cached audio as Saved Tracks
---     (state.offline_tracks), excluding members of fully-downloaded playlists,
---     newest download first. A song therefore moves between sections
---     automatically when its playlist gains/loses full-offline status.
---
--- Processing is chained one playlist per async tick: decoding every cache in
--- a single callback blows Noctalia's per-callback CPU budget on large libs.
 function Library.audit_downloaded_playlists()
 	if not api or not api.load_cached_playlist then
 		return
@@ -225,7 +212,6 @@ function Library.audit_downloaded_playlists()
 
 	local cached = (type(state.cached_audio_ids) == "table") and state.cached_audio_ids or {}
 
-	-- Every pid we know a title for: library first, then recents, then open playlist.
 	local sources, seen_pid = {}, {}
 	local function add_source(list)
 		if type(list) ~= "table" then
@@ -306,9 +292,6 @@ function Library.audit_downloaded_playlists()
 			end
 		end
 
-		-- Saved Tracks are EXPLICIT downloads only: songs that were merely
-		-- auto-cached during playback have no offline_meta entry and go
-		-- into cached_tracks instead.
 		local offline = {}
 		local cached_tracks = {}
 		for vid, own in pairs(state.offline_meta) do
@@ -377,8 +360,6 @@ function Library.audit_downloaded_playlists()
 			Library.resolve_missing_meta(missing_vids)
 		end
 
-		-- Prune metadata whose audio vanished (e.g. Clear Audio) so the
-		-- persisted file cannot grow stale entries forever.
 		local pruned = false
 		for vid in pairs(state.offline_meta) do
 			if not cached[vid] then

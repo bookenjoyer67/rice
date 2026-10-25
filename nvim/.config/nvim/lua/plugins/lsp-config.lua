@@ -41,9 +41,6 @@ return {
         capabilities = capabilities
       })
 
-      -- svelte-language-server ships typescript-svelte-plugin inside its own
-      -- node_modules, so resolve the install path from mason (falling back to
-      -- the default mason location if the registry isn't loaded yet).
       local svelte_ls_path = (function()
         local ok, registry = pcall(require, "mason-registry")
         if ok then
@@ -73,8 +70,6 @@ return {
             },
           },
         },
-        -- Runs per project root, so the plugin path is resolved for the project
-        -- actually being opened instead of whatever cwd nvim happened to start in.
         on_new_config = function(new_config, root_dir)
           local root = (root_dir and root_dir ~= "") and root_dir or vim.fn.getcwd()
           local icons = root .. "/node_modules/@sveltejs/material-icons-components"

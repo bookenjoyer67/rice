@@ -1,8 +1,5 @@
 local REQ_KEY = "yt_music.request"
 
--- Millisecond clock + jitter: entries (mini vs full panel) are separate
--- processes seeding their own counter; seeded >=1ms apart, the >=1000 gap can
--- never be bridged by the +/-999 jitter, so cross-entry nonces cannot collide.
 local req_nonce = noctalia.nowMs() * 1000 + math.random(0, 999)
 
 local function request(action, payload)

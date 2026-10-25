@@ -227,9 +227,6 @@ local track_leave_timer_nonce = 0
 local hover_intent_nonce = 0
 local collapse_timer_nonce = 0
 
--- Leading-edge + trailing-edge debounce: render immediately when the previous
--- hover render was >30ms ago (slow, deliberate moves stay instant), otherwise
--- coalesce rapid sweeps into the window and render once at the end.
 local function hover_render()
 	local now = noctalia.nowMs()
 	if now - last_hover_render_at >= HOVER_COALESCE_MS then
@@ -315,7 +312,6 @@ local function track_hover(hover_state, row_key, sub, item)
 			end
 		end
 	else
-		-- hover_state == "false"
 		if sub == "menu" then
 			hover_intent_nonce = hover_intent_nonce + 1
 		end

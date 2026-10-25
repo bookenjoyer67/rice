@@ -11,9 +11,6 @@ local logger = require("./utils/log.luau")
 local network = require("./utils/network.luau")
 local log = logger.module("ytm", "service")
 
--- Boot environment snapshot: one log line giving the full support picture
--- (host build, plugin version, distro, session) without interrogating the
--- user. Host build comes from `noctalia --version`.
 local function read_line(path, pattern)
 	local raw = noctalia.readFile(path)
 	if type(raw) ~= "string" then
@@ -26,7 +23,6 @@ local function log_boot_env()
 	local plugin_ver = read_line((noctalia.pluginDir() or "") .. "/plugin.toml", 'version%s*=%s*"([^"]+)"')
 	local os_name = read_line("/etc/os-release", 'PRETTY_NAME="([^"]+)"')
 	if os_name == "?" then
-		-- Bazzite/Universal Blue: /etc/os-release may miss; real file lives in /usr
 		os_name = read_line("/usr/lib/os-release", 'PRETTY_NAME="([^"]+)"')
 	end
 	local desktop = noctalia.getenv("XDG_CURRENT_DESKTOP") or "?"
@@ -49,8 +45,6 @@ local function log_boot_env()
 	end)
 end
 
--- Domain logic lives in dedicated backend modules under modules/.
--- Service keeps the wiring: logging, and request dispatch.
 local auth = require("./modules/auth.luau")
 local home = require("./modules/home.luau")
 local library = require("./modules/library.luau")
@@ -141,8 +135,6 @@ local ACTIONS = {
 	download_track = function(r)
 		local vid = (r.item and r.item.id) or r.id or r.video_id
 		if vid and vid ~= "" then
-			-- Already on disk? ⬇ becomes "add to offline downloads" — no
-			-- re-download, just register metadata and list it.
 			if state.cached_audio_ids[vid] == true then
 				log("download_track: already cached, registering explicit id=" .. tostring(vid))
 				downloader.register_explicit(vid, r.item)
@@ -313,8 +305,6 @@ function update()
 		end)
 	end
 
-	-- Connectivity probe every ~20s (update ticks at 1s). First probe fires
-	-- one tick after boot thanks to the pre-advanced counter.
 	probe_tick = probe_tick + 1
 	if probe_tick >= 20 then
 		probe_tick = 0
@@ -357,9 +347,6 @@ end
 noctalia.runAsync("true", function()
 	local const = require("./api/constants.luau")
 	if not noctalia.fileExists(const.COOKIE_PATH) then
-		-- Signed out (e.g. cookies cleared between runs): drop recently-played
-		-- and the saved session from memory AND delete their persisted copies
-		-- so nothing stale resurrects after a later sign-in.
 		state.recent_playlists = {}
 		noctalia.removeFile(const.RECENT_PLAYLISTS_CACHE_PATH)
 		state.player = require("./utils/schema.luau").new().player

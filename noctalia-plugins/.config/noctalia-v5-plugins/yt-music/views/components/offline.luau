@@ -6,9 +6,6 @@ local rerender = require("../rerender.luau")
 
 local PAGE_SIZE = 50
 
--- Everything the user can reach without a network:
---   PLAYLISTS    fully-downloaded playlists (library + recently played)
---   DOWNLOADED     explicitly saved audio that is not a member of any of those
 local function build_offline()
 	local data = state.data
 	local view = state.view
@@ -79,7 +76,6 @@ local function build_offline()
 
 	table.insert(child, ui.row({ key = "spacer-off-1", height = 8, borderWidth = 0, radius = theme.radius }))
 
-	-- Filter chips
 	local filter = view.offline_filter or "all"
 	local track_entries = {} -- { item, cached }
 	local track_title = "TRACKS"
@@ -157,9 +153,6 @@ local function build_offline()
 		end
 	end
 	local show_playlists = (filter == "all" or filter == "tracks") and #visible_pls > 0
-
-	-- One track list for every tab: Downloaded shows saved, Cached shows cached,
-	-- All shows saved ++ cached with a single pager.
 
 	if not show_playlists and not show_track_section then
 		table.insert(
@@ -270,9 +263,6 @@ local function build_offline()
 		local page_start = view.offline_view_page * PAGE_SIZE + 1
 		local page_end = math.min(page_start + PAGE_SIZE - 1, n_total)
 
-		-- Clicking a row queues this visible page starting at the clicked
-		-- position; resolve_stream prefers the local file so playback works
-		-- with no network.
 		local page_tracks = {}
 		for p = page_start, page_end do
 			local entry = track_entries[visible[p]]

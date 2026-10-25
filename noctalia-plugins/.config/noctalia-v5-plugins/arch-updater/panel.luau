@@ -1,14 +1,4 @@
 --!nonstrict
--- arch-updater update panel. Pure renderer over the shared state: the engine
--- (service.luau) publishes "arch_state" and performs the "arch_request"
--- actions this panel emits, so closing the panel never interrupts a check or
--- a run in progress.
---
--- "Update" follows the update_mode setting: a terminal window (default,
--- like the original plugin) or a non-interactive background run. Either
--- way the package list gives way to a live tail of the update log plus a
--- progress bar while it runs. A failed background run keeps its log on
--- screen and offers a terminal retry where prompts work normally.
 
 local STATE_KEY = "arch_state"
 local REQUEST_KEY = "arch_request"
@@ -32,18 +22,12 @@ local function tr(key, args)
     return noctalia.tr(key, args)
 end
 
--- CHANGELOG.md, parsed once at load: "## version — date" headers, "- " bullet
--- lines under each. readFile resolves relative to the plugin directory.
 local function parseChangelog(text)
     local releases = {}
     local current = nil
     for line in (text .. "\n"):gmatch("([^\n]*)\n") do
         local version, date = line:match("^##%s+(%S+)%s*(.-)%s*$")
         if version ~= nil then
-            -- Strip the "— " (or "- ") separator before the date. Done as a
-            -- literal gsub rather than folded into the match pattern above,
-            -- since Lua patterns treat a multi-byte UTF-8 dash inside a
-            -- character class as a set of individual bytes, not one glyph.
             date = date:gsub("^—%s*", ""):gsub("^%-%s*", "")
             current = { version = version, date = date, lines = {} }
             table.insert(releases, current)
@@ -65,8 +49,6 @@ local changelog = (function()
     return parseChangelog(text)
 end)()
 
--- extra: a package name string, or a table merged into the request payload
--- (pkg/version/at for the rollback family).
 local function request(action, extra)
     local prev = noctalia.state.get(REQUEST_KEY)
     local nonce = (type(prev) == "table" and tonumber(prev.nonce) or 0) + 1
@@ -93,8 +75,6 @@ local function openUrl(url)
     noctalia.runAsync("xdg-open " .. shellQuote(url) .. " >/dev/null 2>&1")
 end
 
--- Opens a generic Arch package search instead of a per-repo mirror URL, so
--- it stays correct across Arch-based distros.
 local function openPackage(sourceKey, name)
     if sourceKey == "pacman" then
         openUrl("https://archlinux.org/packages/?q=" .. noctalia.string.urlEncode(name))
@@ -188,8 +168,6 @@ local function sourceGlyph(key)
     return SOURCE_GLYPHS[key] or "package"
 end
 
--- pacman, then the AUR helper, then Flatpak. Only sources with pending
--- packages, biggest first.
 local function orderedSources()
     if snapshot == nil then
         return {}
@@ -211,9 +189,6 @@ local function orderedSources()
     return pending
 end
 
--- Sources that are installed, enabled and have nothing pending. Flatpak is
--- skipped entirely when it is not on the system, so the panel doesn't brag
--- about a tool that isn't there.
 local function cleanSources()
     if snapshot == nil then
         return {}
@@ -330,10 +305,6 @@ local function sourceRows()
     return rows
 end
 
--- ── Ignored packages ─────────────────────────────────────────────────────────
-
--- One display list: packages the last check saw as ignored (with versions),
--- then panel-managed and settings-based ignores with nothing pending.
 local function ignoredEntries()
     if snapshot == nil then
         return {}
@@ -364,7 +335,6 @@ local function ignoredEntries()
     return entries
 end
 
--- Only panel-managed ignores can be lifted from here.
 local function isRemovable(name)
     if snapshot == nil or type(snapshot.ignoredDynamic) ~= "table" then
         return false
@@ -395,7 +365,6 @@ local function ignoredRow(index, item)
             end,
         }))
     elseif item.source == "system" then
-        -- IgnorePkg belongs to root; the tag only explains where to lift it.
         table.insert(children, ui.button({
             text = tr("ignored_tag_system"), variant = "ghost", controlSize = "sm",
             tooltip = tr("ignored_tip_system"),
@@ -442,13 +411,6 @@ local function ignoredRows()
     return rows
 end
 
--- ── Activity graph (the upstream feature, opt-in) ───────────────────────────
-
--- Normalizes the pending-count history to 0..1 for ui.graph, relative to the
--- min/max in the window (not a fixed scale, since pending counts vary wildly
--- between systems). A flat window (min == max, e.g. every check so far found
--- the same count) centers the line at 0.5 instead of pinning it to the top
--- edge, where it would be indistinguishable from the box border.
 local function activityValues(history)
     local minN, maxN = tonumber(history[1].n) or 0, tonumber(history[1].n) or 0
     for _, entry in ipairs(history) do
@@ -497,8 +459,6 @@ local function padGraphLookbehind(values)
     return out
 end
 
--- "2 hours ago", "3 days ago", etc. nil for entries migrated from the old
--- history format, which never recorded a timestamp.
 local function relativeTime(at)
     local t = tonumber(at)
     if t == nil then
@@ -519,9 +479,6 @@ local function relativeTime(at)
     end
 end
 
--- "Updated · 2 hours ago" for the check that verified an update run, else
--- "3 pending updates · 2 hours ago". Shared by the hover tooltip and the
--- top-right caption so both describe a point the same way.
 local function describeEntry(entry)
     local n = tonumber(entry.n) or 0
     local text = entry.afterUpdate == true and tr("activity.updated")
@@ -533,19 +490,6 @@ local function describeEntry(entry)
     return text
 end
 
--- ui.graph takes no pointer props of its own and the framework has no
--- overlay control, so per-point hover cannot live on the line itself: it is
--- a row of hit targets right under it, drawn as an axis of small dots (the
--- hovered one lights up in the accent color) so the interactivity is
--- visible without the ghost-button hover flash.
---
--- Real points sit at (k-1)/(#history-1) of the width (see
--- padGraphLookbehind), i.e. #history-1 equal gaps, not #history equal slots
--- - so this builds one equal-width segment per gap rather than per entry,
--- ending each segment (and its dot) exactly on the point at its right edge.
--- That leaves entry 1 (at the left edge, with no gap before it) without its
--- own hover zone, but keeps every other spike landing right at the end of
--- its segment instead of drifting toward the start of an oversized one.
 local function activityHoverRow(history)
     local segments = {}
     for i = 2, #history do
@@ -578,10 +522,6 @@ local function activityHoverRow(history)
     return ui.row({ key = "activity-hits", gap = 1 }, segments)
 end
 
--- A small trend graph of pending-update counts across recent checks, plus
--- when the last update ran (or, while hovering a point, that point's own
--- description). Off entirely when show_activity_graph is off, and hidden
--- until there is enough history to draw a line.
 local function activitySection()
     if snapshot == nil or noctalia.getConfig("show_activity_graph") ~= true then
         return nil
@@ -622,8 +562,6 @@ local function activitySection()
     })
 end
 
--- ── Run history and rollback ─────────────────────────────────────────────────
-
 local function historyRuns()
     if snapshot == nil or type(snapshot.history) ~= "table" then
         return {}
@@ -649,8 +587,6 @@ local function describeRun(run)
     return text
 end
 
--- The footer strip: one equal-width segment per recorded run, oldest on the
--- left. Hover describes the run, click opens its package list.
 local function historySection()
     local runs = historyRuns()
     if #runs == 0 then
@@ -661,8 +597,6 @@ local function historySection()
         local run = runs[i]
         table.insert(segments, ui.button({
             key = "run-" .. tostring(run.at),
-            -- primary: painted in the theme's accent color, so the strip is
-            -- visible at rest (ghost would only show on hover)
             variant = "primary",
             flexGrow = 1,
             height = 10,
@@ -698,9 +632,6 @@ local function probeFor(run)
     return nil
 end
 
--- Two-click rollback: the first click arms the button (it turns into a
--- confirm label), the second sends the request. Anything else re-renders
--- the armed state away.
 local function rollbackButton(key, tooltip, onConfirm)
     if armedKey == key then
         return ui.button({
@@ -763,8 +694,6 @@ local function rollbackRow(run, index, item, probePkgs)
     return ui.row({ key = key .. "-row", gap = 6, align = "center" }, children)
 end
 
--- The opened run: header with a back button and a whole-run rollback, then
--- one row per package showing the run's from -> to and a rollback control.
 local function runViewRows()
     local run = findHistoryRun(openedRunAt)
     if run == nil then
@@ -803,8 +732,6 @@ local function runViewRows()
     return rows
 end
 
--- The changelog view: a back button, then one release per entry in
--- CHANGELOG.md with its bullet points underneath.
 local function changelogRows()
     local rows = {}
     table.insert(rows, ui.row({ key = "changelog-head", gap = 6, align = "center" }, {
@@ -842,8 +769,6 @@ local function changelogRows()
     return rows
 end
 
--- Live tail of the update log, with a progress bar while packages are being
--- processed. Shown during a run and kept on screen after a failed one.
 local function logSection()
     local children = {}
 
@@ -888,9 +813,6 @@ local function logSection()
         table.insert(children, ui.row({ key = "log-actions", gap = 6 }, {
             ui.button({
                 text = tr("action_open_log"), variant = "ghost", controlSize = "sm",
-                -- Opened by the service in a terminal pager: xdg-open on a
-                -- text file dies silently when the default handler is a
-                -- terminal editor.
                 onClick = function()
                     request("open_log")
                 end,
@@ -901,8 +823,6 @@ local function logSection()
     return ui.column({ key = "log", gap = 6, flexGrow = 1 }, children)
 end
 
--- Download size, reboot recommendation and Arch news. Each is its own line,
--- so turning one off in settings just removes that line.
 local function extras()
     local lines = {}
     if snapshot == nil then
@@ -926,9 +846,6 @@ local function extras()
         }))
     end
 
-    -- Offered until the polkit keep-authorization rule is installed. Only in
-    -- background mode: a terminal run goes through sudo, so the repeated
-    -- polkit prompts the rule solves never happen there.
     if
         snapshot.polkitRule == false
         and noctalia.getConfig("update_mode") == "background"
@@ -979,10 +896,6 @@ end
 local function body()
     local children = {}
 
-    -- The middle of the panel: the changelog, the live log while updating
-    -- (and after a failure), an opened history run, or the package list.
-    -- The changelog is checked first so it can be opened during a run: the
-    -- back button returns to the live log, which is otherwise still shown.
     if changelogOpen then
         table.insert(children, ui.scroll({ key = "changelog-view", flexGrow = 1, gap = 4 }, changelogRows()))
         return children
@@ -1091,10 +1004,6 @@ render = function()
         table.insert(children, node)
     end
 
-    -- Both footers hide while a check or run is on screen, so neither ever
-    -- competes with the live log for space. The activity graph also hides
-    -- while the changelog is open: it plots pending-update counts, which
-    -- has nothing to do with release notes.
     local activity = not busy() and not changelogOpen and activitySection() or nil
     local history = not busy() and historySection() or nil
     if activity ~= nil or history ~= nil then
@@ -1115,8 +1024,6 @@ render = function()
 
     if phase ~= "missing" then
         local footer = {}
-        -- Not offered after a failed rollback: re-running the *update*
-        -- command in a terminal is not a retry of the rollback.
         if runFailed() and (snapshot == nil or snapshot.runKind ~= "rollback") then
             table.insert(footer, ui.button({
                 key = "retry-terminal",
@@ -1144,10 +1051,6 @@ render = function()
             onClick = function()
                 request("update")
                 if not backgroundMode then
-                    -- Terminal mode hands the run off to its own window, so
-                    -- the panel has nothing left to show; background mode
-                    -- keeps it open since the live log is the only place
-                    -- progress is visible.
                     panel.close()
                 end
             end,
@@ -1166,9 +1069,6 @@ function onOpen(_context)
     openedRunAt = nil
     armedKey = nil
     activityHoverIndex = nil
-    -- A fresh auto-open from a just-finished update (see the state watcher
-    -- below) survives this reset once, so it's not discarded before it's
-    -- ever seen; any other reason for opening still defaults to the sources.
     if not changelogAutoOpenPending then
         changelogOpen = false
     end
@@ -1176,8 +1076,6 @@ function onOpen(_context)
     render()
 end
 
--- An armed confirm is a one-click trigger for a privileged downgrade: if the
--- confirming click doesn't come soon, put the plain button back.
 function update()
     if armedKey ~= nil and os.time() - armedAt >= ARM_TIMEOUT_S then
         armedKey = nil
@@ -1199,11 +1097,6 @@ noctalia.state.watch(STATE_KEY, function(value)
         armedKey = nil
         changelogOpen = false
     end
-    -- lastUpdateAt only moves for a real, successful update run (never a
-    -- rollback or a plain check, see recordUpdateRun in service.luau), and it
-    -- is bumped the moment the run succeeds, before the auto re-check even
-    -- starts - so a change here is an exact, one-shot "an update just
-    -- finished" signal.
     local prevUpdateAt = snapshot ~= nil and tonumber(snapshot.lastUpdateAt) or nil
     local newUpdateAt = tonumber(value.lastUpdateAt)
     if

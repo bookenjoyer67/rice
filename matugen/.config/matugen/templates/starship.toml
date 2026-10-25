@@ -1,20 +1,5 @@
 "$schema" = 'https://starship.rs/config-schema.json'
 
-# Divine Machinery — starship prompt
-# Circular pill segments: every module draws its own  caps + bg, so the
-# chain can NEVER break no matter which modules are present.
-#
-# COLOURS ARE GENERATED: this file is a matugen template. Every value in
-# [palettes.divine-machinery] is a Material role taken from the current
-# wallpaper, so the prompt follows the rice's palette like kitty and nvim do.
-# matugen renders it to ~/.config/starship.toml on every wallpaper change
-# ([templates.starship] in ~/.config/matugen/config.toml). Do not edit the
-# generated copy — edit this template.
-#
-# Each pill pairs a filled surface with its own on-colour (Material's
-# guaranteed-contrast pair), never a fixed black/white, so a light wallpaper and
-# a dark wallpaper both stay readable.
-
 format = "[💻](fg:hotpink) $username $directory $git_branch $git_status $cmd_duration $status $nodejs $rust $python $c $golang $php $java $kotlin $docker_context $time$line_break$character"
 
 palette = 'divine-machinery'
@@ -32,7 +17,6 @@ parchment = "{{colors.on_surface.dark.hex}}"
 void      = "{{colors.surface_container_lowest.dark.hex}}"
 white     = "{{colors.on_primary.dark.hex}}"
 black     = "{{colors.surface_container_lowest.dark.hex}}"
-# foregrounds that pair with each pill background
 onhot     = "{{colors.on_primary.dark.hex}}"
 ongold    = "{{colors.on_tertiary.dark.hex}}"
 ongreen   = "{{colors.on_secondary.dark.hex}}"
@@ -44,23 +28,19 @@ onred     = "{{colors.on_error.dark.hex}}"
 [os]
 disabled = true
 
-# HERO
 [username]
 show_always = true
 format = '[](fg:hotpink)[ 👤 $user ](fg:onhot bg:hotpink)[](fg:hotpink)'
 
-# PATH
 [directory]
 truncation_length = 5
 truncation_symbol = "../"
 format = '[](fg:black)[ 📁 $path ](fg:parchment bg:black)[](fg:black)'
 
-# BRANCH
 [git_branch]
 symbol = ""
 format = '[](fg:gold)[ $symbol $branch ](fg:ongold bg:gold)[](fg:gold)'
 
-# DIRTY STATE
 [git_status]
 format = '[](fg:crimson)[ $all_status$ahead_behind ](fg:onred bg:crimson)[](fg:crimson)'
 
@@ -75,7 +55,6 @@ format = '[](fg:red)[ $symbol $status ](fg:onred bg:red)[](fg:red)'
 pipestatus = true
 pipestatus_format = '[](fg:red)[ $symbol $pipestatus ](fg:onred bg:red)[](fg:red)'
 
-# LANGS
 [nodejs]
 symbol = ""
 format = '[](fg:green)[ $symbol $version ](fg:ongreen bg:green)[](fg:green)'
@@ -112,7 +91,6 @@ format = '[](fg:purple)[ $symbol $version ](fg:onpurple bg:purple)[](fg:pu
 symbol = ""
 format = '[](fg:black)[ $symbol $context ](fg:cyan bg:black)[](fg:black)'
 
-# CLOCK
 [time]
 disabled = false
 time_format = "%H:%M"

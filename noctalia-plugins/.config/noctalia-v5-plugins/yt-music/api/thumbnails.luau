@@ -1,7 +1,5 @@
 --!strict
 
--- thumbnail path/ensure/attach helpers.
-
 local const = require("./constants.luau")
 local THUMB_DIR = const.THUMB_DIR
 
@@ -10,12 +8,6 @@ local network = require("../utils/network.luau")
 
 local EXPO = {}
 
--- Thumbnail filename = stable resource id extracted from the URL itself:
---   yt3.googleusercontent.com/<seg>=w120…   → <seg>
---   i.ytimg.com/vi/<videoId>/hqdefault.jpg  → <videoId>
--- Identical covers therefore collapse to one file/download with zero hashing
--- or extra machinery. Unrecognised shapes fall back to the legacy per-id name
--- (dedup skipped for those, none observed in practice).
 local function thumb_key(url): string?
 	if type(url) ~= "string" or url == "" then
 		return nil
@@ -35,9 +27,6 @@ local function thumb_key(url): string?
 	return nil
 end
 
--- Content-addressed thumbnail path: one file per unique source resource, so
--- album playlists sharing a cover download (and store) it exactly once.
--- Falls back to the legacy per-id name when no key is extractable.
 function EXPO.path_for(id: string, url: string?): string
 	local key = thumb_key(url)
 	if key then
@@ -117,15 +106,11 @@ function EXPO.ensure_thumbnails(items, on_updated, tag)
 	end
 
 	local configFile = scratch.path("thumbcfg")
-	-- One config entry per unique output path: same-resource covers collapse
-	-- to a single download instead of one per track.
 	local lines = {}
 	local seen_paths = {}
 	for _, m in ipairs(missing) do
 		if not seen_paths[m.path] then
 			seen_paths[m.path] = true
-			-- curl -K config values: strip quotes/control chars so a hostile URL
-			-- cannot inject additional curl options via the config file
 			local safe_url = tostring(m.url):gsub('[%c"]', "")
 			table.insert(lines, string.format('output = "%s"\nurl = "%s"', m.path, safe_url))
 		end

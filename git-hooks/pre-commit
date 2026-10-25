@@ -1,15 +1,4 @@
 #!/usr/bin/env bash
-# Pre-commit guard: refuse commits that contain credential literals.
-#
-# Enable per clone (hooks are not versioned, so point git at this directory):
-#   git config core.hooksPath git-hooks
-#
-# Bypass ONLY for a verified false positive:
-#   SKIP_SECRET_SCAN=1 git commit ...
-#
-# Why this exists: a Google API key was committed to api/constants.luau in the
-# yt-music plugin and stayed in history for 18 commits. Secrets belong in the
-# environment or a 0600 file outside the repo, never in a tracked file.
 
 set -uo pipefail
 [ "${SKIP_SECRET_SCAN:-0}" = "1" ] && exit 0
@@ -32,12 +21,10 @@ patterns=(
   $'^\\.?youtube\\.com\tTRUE'             # Netscape cookie row for YouTube
 )
 
-# Values that look like secrets but are documentation placeholders.
 allow='REDACTED|[Yy]our[_-]?[A-Za-z]*[Kk]ey|example|placeholder|xxxx|CHANGEME|<[^>]+>'
 
 fail=0
 while IFS= read -r -d '' f; do
-  # the guard's own source necessarily contains the patterns it looks for
   case "$f" in git-hooks/*) continue ;; esac
   git diff --cached --numstat -- "$f" 2>/dev/null | grep -q '^-' && continue   # binary
   content=$(git show ":$f" 2>/dev/null) || continue

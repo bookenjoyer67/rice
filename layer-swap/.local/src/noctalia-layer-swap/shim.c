@@ -1,34 +1,3 @@
-/*
- * noctalia-layer-swap.so — LD_PRELOAD shim for Noctalia on niri.
- *
- * WHY
- *   niri zooms the Background and Bottom layers together with the workspaces in
- *   the overview, so Noctalia's desktop widgets (which Noctalia hard-codes to the
- *   Bottom layer) slide and shrink away instead of staying put. EWW avoids this by
- *   swapping each widget for a top-layer twin while the overview is open; Noctalia
- *   exposes no layer option and no layer IPC for desktop widgets, so the swap has
- *   to be driven from inside Noctalia's own Wayland connection.
- *
- * WHAT
- *   Interposes wl_proxy_marshal_array_flags to spot
- *   zwlr_layer_shell_v1.get_layer_surface calls whose namespace starts with
- *   "noctalia-desktop-widget-", remembers the created layer-surface (and its
- *   wl_surface), and — watching niri's event stream on a worker thread — moves
- *   those surfaces to the Background layer while the overview is open and back to
- *   Bottom when it closes. A place-within-backdrop layer-rule (same namespace) then
- *   renders them in the stationary backdrop: they stay put AND draw BELOW the
- *   windows. niri re-stacks a surface whenever its client changes layer
- *   (src/handlers/layer_shell.rs: pending_layer != current_layer -> recompute),
- *   and wlr-layer-shell layers are double-buffered, so a set_layer is followed by
- *   a wl_surface commit to apply it immediately.
- *
- * SAFETY
- *   - Everything is marshalled on the main thread (the hooks); the worker thread
- *     only sets a flag.
- *   - If dlsym or the event stream fails, the shim silently does nothing.
- *   - NOCTALIA_LAYER_SWAP=0 disables it, NOCTALIA_LAYER_SWAP=log runs it dry.
- *   - Only surfaces whose namespace matches the prefix are ever touched.
- */
 
 #define _GNU_SOURCE
 #include <dlfcn.h>
@@ -79,12 +48,6 @@ static int g_count = 0;
 static int g_enabled = 1;
 static int g_dry = 0;
 
-/* Resolve the next definition of a wayland symbol.
- *
- * dlsym(RTLD_NEXT, ...) only works when libwayland-client is already after us in
- * the link map. Toolkits that dlopen() wayland (kitty/glfw do) break that: the
- * lookup returns NULL and the hook either calls a null pointer or reports a fake
- * success. Fall back to the handle of the already-loaded library. */
 static void *resolve_next(const char *sym)
 {
     void *p = dlsym(RTLD_NEXT, sym);
@@ -158,7 +121,6 @@ static int is_tracked(struct wl_proxy *ls)
     return found;
 }
 
-/* Marshal one request on a proxy we already know how to talk to. */
 static void send(struct wl_proxy *proxy, unsigned opcode, union wl_argument *args)
 {
     if (!real_marshal_array_flags || !proxy)
@@ -179,7 +141,6 @@ static void set_layer(struct tracked *t, unsigned layer)
     }
     a.u = layer;
     send(t->ls, OP_SF_SET_LAYER, &a);
-    /* Layers are double-buffered: the surface has to commit for the move to apply. */
     send(t->ws, OP_SURFACE_COMMIT, NULL);
     t->layer = layer;
     fprintf(stderr, "[layer-swap] moved %p -> layer %u\n", (void *)t->ls, layer);
@@ -195,9 +156,7 @@ static void apply_pending(void)
     if (want)
         g_pending = 0;
     if (want) {
-        /* overview OPEN -> Background layer: the matching place-within-backdrop
-         * layer-rule drops the widget into niri's stationary backdrop, so it stays
-         * put AND draws BELOW the open windows. overview CLOSED -> native Bottom. */
+
         unsigned layer = (want == 1) ? LAYER_BACKGROUND : LAYER_BOTTOM;
 
         if (getenv("NOCTALIA_LAYER_SWAP_DEBUG"))
@@ -208,8 +167,6 @@ static void apply_pending(void)
     pthread_mutex_unlock(&g_lock);
 }
 
-/* wl_proxy_marshal_array_flags() takes the display mutex, so marshalling from the
- * watcher thread is safe; flushing needs the display, captured by the hook. */
 static struct wl_display *g_display = NULL;
 static int (*g_real_flush)(struct wl_display *) = NULL;
 
@@ -220,15 +177,11 @@ static void apply_and_flush(void)
         g_real_flush(g_display);
 }
 
-/* ---- hooks ------------------------------------------------------------- */
-
 static pthread_mutex_t g_start_lock = PTHREAD_MUTEX_INITIALIZER;
 static volatile int g_watcher_up = 0;
 
 static void *watcher(void *unused);
 
-/* Started lazily: a client that forks after dlopen (eww daemon, for one) would
- * otherwise lose the thread, since threads do not survive fork(). */
 static void maybe_start_watcher(void)
 {
     if (__atomic_load_n(&g_watcher_up, __ATOMIC_RELAXED))
@@ -244,8 +197,6 @@ static void maybe_start_watcher(void)
     pthread_mutex_unlock(&g_start_lock);
 }
 
-/* After a fork the child has the code but not the thread: reset so the hook
- * restarts the watcher, and reinit mutexes that may have been locked. */
 static void atfork_child(void)
 {
     __atomic_store_n(&g_watcher_up, 0, __ATOMIC_RELAXED);
@@ -272,20 +223,15 @@ struct wl_proxy *wl_proxy_marshal_array_flags(struct wl_proxy *proxy, unsigned o
         const char *name = iface_name(proxy);
 
         maybe_start_watcher();
-        /* The client marshals constantly, so this is a dependable place to apply
-         * a pending layer swap on its own thread -- more so than wl_display_flush,
-         * which some toolkits never call directly. */
+
         apply_pending();
 
         if (name && strcmp(name, IFACE_SHELL) == 0 && opcode == OP_GET_LAYER_SURFACE && args) {
-            /* signature "no?us": n, surface, output, layer, namespace */
             const char *ns = args[4].s;
             if (ns && strncmp(ns, NS_PREFIX, sizeof(NS_PREFIX) - 1) == 0) {
                 struct wl_proxy *ls = real_marshal_array_flags(proxy, opcode, interface, version, flags, args);
                 track(ls, (struct wl_proxy *)args[1].o, args[3].u);
-                /* Force exclusive_zone = -1 ("ignore exclusive zones") so niri's
-                 * place-within-backdrop rule applies even if this client never
-                 * sets it (gtk-layer-shell/eww). */
+
                 if (!g_dry) {
                     union wl_argument e;
                     e.i = -1;
@@ -294,11 +240,7 @@ struct wl_proxy *wl_proxy_marshal_array_flags(struct wl_proxy *proxy, unsigned o
                 return ls;
             }
         } else if (name && strcmp(name, IFACE_SURFACE) == 0 && opcode == OP_SF_SET_EXCLUSIVE_ZONE && args) {
-            /* niri's place-within-backdrop rule only applies to background-layer
-             * surfaces that IGNORE exclusive zones (exclusive_zone == -1, as
-             * wallpaper tools set it). gtk-layer-shell (eww) leaves it at 0, so
-             * force -1 on our tracked desktop-widget surfaces; Noctalia already
-             * sets -1 itself, so this is a no-op there. */
+
             if (is_tracked(proxy)) {
                 args[0].i = -1;
                 if (getenv("NOCTALIA_LAYER_SWAP_DEBUG"))
@@ -355,8 +297,6 @@ int wl_display_dispatch(struct wl_display *display)
     return real ? real(display) : -1;
 }
 
-/* ---- niri overview watcher -------------------------------------------- */
-
 static void *watcher(void *unused)
 {
     (void)unused;
@@ -386,10 +326,6 @@ static void *watcher(void *unused)
     return NULL;
 }
 
-/* Only arm in the processes that own desktop widgets: the shell itself, and the
- * eww daemon (its desktop widgets use the same noctalia-desktop-widget- namespace
- * prefix and get the identical Bottom<->Background swap). LD_PRELOAD is inherited
- * by every child those spawn, and those have no desktop widgets to move. */
 static int process_is_target(void)
 {
     const char *name = program_invocation_short_name;
@@ -422,12 +358,7 @@ __attribute__((constructor)) static void layer_swap_init(void)
         return;
     }
     if (!process_is_target()) {
-        /* LD_PRELOAD is inherited by every app Noctalia launches, so this
-         * library is present in processes it has no business touching. The
-         * symbols stay interposed, but every hook has to behave as a pure
-         * pass-through from here on -- leaving g_enabled at 1 started a
-         * `niri msg event-stream` watcher and ran apply_pending() inside
-         * arbitrary clients, and kitty died in glfwInit. */
+
         g_enabled = 0;
         return;
     }

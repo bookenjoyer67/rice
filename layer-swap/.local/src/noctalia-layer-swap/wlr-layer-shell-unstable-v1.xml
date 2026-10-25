@@ -89,8 +89,6 @@
       <entry name="overlay" value="3"/>
     </enum>
 
-    <!-- Version 3 additions -->
-
     <request name="destroy" type="destructor" since="3">
       <description summary="destroy the layer_shell object">
         This request indicates that the client will not use the layer_shell
@@ -377,8 +375,6 @@
       <entry name="right" value="8" summary="the right edge of the anchor rectangle"/>
     </enum>
 
-    <!-- Version 2 additions -->
-
     <request name="set_layer" since="2">
       <description summary="change the layer of the surface">
         Change the layer that the surface is rendered on.
@@ -387,8 +383,6 @@
       </description>
       <arg name="layer" type="uint" enum="zwlr_layer_shell_v1.layer" summary="layer to move this surface to"/>
     </request>
-
-    <!-- Version 5 additions -->
 
     <request name="set_exclusive_edge" since="5">
       <description summary="set the edge the exclusive zone will be applied to">

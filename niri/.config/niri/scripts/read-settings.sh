@@ -1,21 +1,4 @@
 #!/usr/bin/env bash
-# read-settings.sh — the settings file for wapper: read, materialise, write.
-#
-# Sourced by the scripts (via $DER, so it works from both ~/Projects/wapper/
-# scripts and the deployed ~/.config/niri/scripts) and by set-setting.sh.
-# It never changes shell options: callers run either `set -euo pipefail` or
-# `set -uo pipefail`, and both must keep working.
-#
-# Grammar (the panel implements the same one):
-#   key = value, one per line; split on the FIRST '=' only; blank lines skip;
-#   a line whose first non-space character is '#' is a comment; no inline
-#   comments; a duplicate key means the LAST occurrence wins; unknown keys are
-#   ignored; an empty value falls back to the built-in default.
-#
-# Precedence: environment variable > settings file > built-in default.
-#
-# Executed (`bash read-settings.sh`, i.e. --print) it prints the resolved
-# key=value set, for the tester and for the panel's manual checklist.
 
 ws_file() {
     printf '%s' "${WALLPAPER_SETTINGS:-$HOME/.config/wallpaper/settings}"
@@ -25,7 +8,6 @@ ws_debug() {
     [ -n "${WALLPAPER_DEBUG:-}" ]
 }
 
-# Trims leading and trailing whitespace without forking.
 ws_trim() {
     local s="${1-}"
     s="${s#"${s%%[![:space:]]*}"}"
@@ -33,8 +15,6 @@ ws_trim() {
     printf '%s' "$s"
 }
 
-# A leading ~/ in a path value means $HOME (values are otherwise verbatim:
-# no shell expansion, no quote stripping).
 ws_tilde() {
     local p="${1-}"
     case "$p" in
@@ -73,9 +53,6 @@ ws_is_path_key() {
     esac
 }
 
-# Emits the commented default settings file. The `set` key name is
-# interpolated so this file contains no line starting with `set `: the
-# strict-mode gate greps for that to prove the lib sets no shell options.
 ws_template() {
     local WS_K=set
     cat <<WS_TEMPLATE
@@ -116,8 +93,6 @@ min_res = 2560x1440
 WS_TEMPLATE
 }
 
-# Creates the settings file with the commented defaults when it is missing.
-# The file may hold an API key, so it is written 600. Never fails.
 ws_materialise() {
     local file dir tmp
     file="$(ws_file)"
@@ -138,7 +113,6 @@ ws_materialise() {
     return 0
 }
 
-# Last matching value in the file, trimmed. Empty when absent. Never fails.
 ws_file_get() {
     local key="${1-}" file line t k found=""
     file="$(ws_file)"
@@ -167,7 +141,6 @@ ws_file_get() {
     return 0
 }
 
-# env > file > DEFAULT. Never fails; an empty env var counts as unset.
 ws_get() {
     local key="${1-}" default="${2-}" name value=""
     name="$(ws_env_name "$key")"
@@ -195,12 +168,6 @@ ws_purity() {
     esac
 }
 
-# Rewrites KEY = VALUE in place, preserving comments and every other key.
-# Earlier duplicates of the same key are dropped: the last occurrence is the
-# one that was being honoured, and collapsing them keeps the file converged.
-# Returns 0 on success, 1 on write failure, and 3 when the key is not one of
-# the known keys — that last check is the library's own guard for a direct
-# caller; set-setting.sh screens unknown keys itself and exits 2.
 ws_set() {
     local key="${1-}" value="${2-}" file tmp line t k n=0 target=0 wrote=0
     if ! ws_is_key "$key"; then
@@ -267,8 +234,6 @@ ws_set() {
     return 0
 }
 
-# Resolves every key once into the WS_* globals. The fetcher and set-setting
-# both start here, so the grammar has exactly one implementation.
 ws_apply() {
     ws_materialise
 
@@ -298,7 +263,6 @@ ws_apply() {
     WS_MIN_SAT="$(ws_get min_sat "0.30")"
     WS_MIN_RES="$(ws_get min_res "2560x1440")"
 
-    # The one place the "named set replaces the pool list" rule lives.
     if [ -n "$WS_SET" ]; then
         WS_LIST_FILE="$HOME/.config/wallpaper/sets/$WS_SET.txt"
     else
@@ -316,7 +280,6 @@ ws_apply() {
     return 0
 }
 
-# Executed rather than sourced: print the resolved settings and exit.
 if [ "${BASH_SOURCE[0]}" = "$0" ]; then
     ws_apply
     printf 'settings=%s\n' "$(ws_file)"

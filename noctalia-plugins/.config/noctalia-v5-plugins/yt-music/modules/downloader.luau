@@ -20,12 +20,6 @@ local inflight = {} -- video id -> plid
 local active = 0
 local pending = {} -- plid -> number of queue entries waiting/done once
 
--- Standalone downloads (download button outside a playlist) keep their
--- metadata in state.offline_meta so the audit's Saved-Tracks rebuild can
--- label them. Lives on store state but is deliberately NOT published, and
--- is persisted to disk by library.save_offline_meta so titles survive
--- restarts.
-
 local function remember_saved_meta(id, meta)
 	if type(meta) ~= "table" then
 		return
@@ -61,8 +55,6 @@ local function note_offline_row(id, meta)
 	state.offline_tracks = list
 end
 
--- ⬇ click on an already-cached (⚡) track: no re-download — just mark it as an
--- explicit download so it lands in Saved Tracks and flips the row to ✓.
 function Downloader.register_explicit(id, meta)
 	if not id or id == "" then
 		return

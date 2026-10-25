@@ -1,8 +1,3 @@
--- spotport bar widget: status light + manual sync trigger.
---
--- State comes entirely from ~/.cache/spotport/status.json, which the CLI
--- rewrites at the start and end of every run. That keeps this widget dumb and
--- keeps the sync logic in one place (Python), where it is testable.
 
 local pluginDir = noctalia.pluginDir()
 
@@ -101,8 +96,6 @@ function update()
   )
   setWidget(ok and "brand-spotify" or "alert-triangle", text, tip)
 
-  -- Notify only on a genuine state change, so a failing sync does not nag on
-  -- every refresh tick.
   if lastState ~= nil and lastState ~= state and not ok then
     noctalia.notify("spotport", tostring(st.message or state))
   end
@@ -141,10 +134,6 @@ function open_review()
   end, 8000)
 end
 
--- The host dispatches [widget.actions] bindings into onIpc; without this
--- callback the click binding resolves to "no onIpc callback" and nothing
--- happens. Accept both (event, payload) and a single table payload, since the
--- exact arity is not documented.
 function onIpc(a, b)
   local event = a
   if type(a) == "table" then

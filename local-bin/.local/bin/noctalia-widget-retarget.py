@@ -40,10 +40,8 @@ SECTIONS = ("desktop_widgets", "lockscreen_widgets")
 BLOCK_RE = re.compile(
     r'^(\s*)\[(desktop_widgets|lockscreen_widgets)\.widget\.("?[^".\]]+"?)\]\s*$')
 
-
 def out(msg):
     print(msg)
-
 
 def live_outputs(assume=None):
     if assume:
@@ -63,7 +61,6 @@ def live_outputs(assume=None):
     except Exception:
         pass
     return []
-
 
 def parse(lines):
     """Return [{id, section, start, end, output, type}] for each widget.
@@ -97,7 +94,6 @@ def parse(lines):
                 w["type"] = s.split('"')[1] if '"' in s else None
     return widgets
 
-
 def widget_order_slice(lines, section):
     """Return (start_line, end_line) of `widget_order = [ ... ]` inside [section]."""
     sec_start = None
@@ -117,11 +113,9 @@ def widget_order_slice(lines, section):
             return (i, j)
     return None
 
-
 def ids_in_order(lines, span):
     text = "".join(lines[span[0]:span[1] + 1])
     return re.findall(r'"([^"]+)"', text)
-
 
 def main():
     if not STATE.is_file():
@@ -145,15 +139,11 @@ def main():
         if w["output"] and w["output"] not in known:
             retargeted.append(w)
 
-    # Dedupe: per section+type, keep the first in widget_order; only when the
-    # widgets involved were retargeted (i.e. this machine collapsed several
-    # recorded outputs into one).
     orders = {}
     for sec in SECTIONS:
         span = widget_order_slice(lines, sec)
         orders[sec] = ids_in_order(lines, span) if span else []
 
-    # Effective output after retargeting, used only for grouping.
     for w in widgets:
         w["effective"] = first if (w["output"] and w["output"] not in known) else w["output"]
 
@@ -193,13 +183,11 @@ def main():
         del new_lines[start:end]
     text = "".join(new_lines)
 
-    # rewrite outputs
     for w in retargeted:
         text = re.sub(
             r"(\[%s\.widget\.%s\][^\[]*?output = )\"[^\"]*\"" % (re.escape(w["section"]), re.escape(w["id"])),
             r'\1"%s"' % first, text, count=1, flags=re.S)
 
-    # prune widget_order entries of the dropped widgets
     for sec in SECTIONS:
         sec_drop = {w["key"] for w in dropped if w["section"] == sec}
         if not sec_drop:
@@ -221,7 +209,6 @@ def main():
     tmp.replace(STATE)
     out(f"  wrote     {STATE}")
     return 0
-
 
 if __name__ == "__main__":
     sys.exit(main())

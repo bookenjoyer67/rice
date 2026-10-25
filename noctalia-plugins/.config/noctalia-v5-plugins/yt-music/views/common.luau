@@ -2,9 +2,6 @@ local theme = require("../utils/theme.luau")
 local state = require("./state.luau")
 local rerender = require("./rerender.luau")
 
--- fileExists is a synchronous host call; on hover every row re-renders, so
--- memoize existence with a short TTL. Newly-downloaded thumbs and deleted
--- files self-correct within EXISTS_TTL seconds.
 local exists_cache = {}
 local EXISTS_TTL = 5
 
@@ -38,9 +35,6 @@ local function fmt_count(n)
 	return tostring(n)
 end
 
--- Local text filter using the host's native matcher. Empty query matches
--- everything; otherwise true when the pattern fuzzy-matches. Falls back to
--- a plain substring search when the host matcher is unavailable.
 local function fuzzy_match(query, text)
 	if not query or query == "" then
 		return true
@@ -88,8 +82,6 @@ local function icon_btn(glyph, onClick, variant)
 end
 
 local function chunk_rows(cells, per_row, key_prefix, gap)
-	-- Pad the final row with invisible stretch cells so short rows keep the
-	-- same card width as full ones instead of growing to fill the panel.
 	while #cells % per_row ~= 0 do
 		table.insert(
 			cells,
@@ -121,7 +113,6 @@ local function chunk_rows(cells, per_row, key_prefix, gap)
 	return rows
 end
 
--- spec = { drag_type, payload, enabled? }
 local function drag_grip(row_key, spec, highlighted)
 	return ui.dragSource({
 		key = row_key .. "-grip",
@@ -255,8 +246,6 @@ local function track_actions(item, row_key, trailing)
 		controlSize = "sm",
 		tooltip = "Right click for menu",
 		visible = true,
-		-- Left click is a deliberate no-op so the button swallows the row's
-		-- play onClick; the flyout opens on hover, the menu on right click.
 		onClick = function() end,
 		onRightClick = function()
 			state.open_track_context_menu(item)
@@ -324,9 +313,6 @@ local function media_row(item, idx, custom_click, is_active, drag, key_prefix)
 		is_current and "primary/0.2" or "surface_variant/0.3"
 	)
 
-	-- Trailing cluster: [✓ | ⚡?] [duration]
-	--   ✓  explicit download (listed in Saved Tracks)
-	--   ⚡  cached by playback — plays offline, not yet saved
 	local trailing = {}
 	if is_explicit then
 		table.insert(

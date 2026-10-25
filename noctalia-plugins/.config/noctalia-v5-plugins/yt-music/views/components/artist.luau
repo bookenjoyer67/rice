@@ -3,9 +3,6 @@ local state = require("../state.luau")
 local request = require("../actions.luau")
 local common = require("../common.luau")
 
--- Artist detail: header profile + top-ish tracks + albums/singles rows.
--- Everything here needs the network; offline shows a clear message instead
--- of stale guesses.
 local function build_artist()
 	local data = state.data
 	local artist = data.artist or { id = "", title = "" }
@@ -80,8 +77,6 @@ local function build_artist()
 			})
 		)
 
-		-- Home-style cards: one per album/single, sharing the cover file when
-		-- several singles point at the same artwork resource.
 		local cards = {}
 		for _, pl in ipairs(data.artist_related) do
 			local key = "ar-rel-" .. tostring(pl.id or "")

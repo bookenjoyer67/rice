@@ -112,7 +112,6 @@ local function build_sidebar()
 		)
 	end
 
-	-- Always-visible connectivity cue, independent of which page is open.
 	if data.online == false then
 		table.insert(
 			sidebar_items,
@@ -132,8 +131,6 @@ local function build_sidebar()
 
 	table.insert(sidebar_items, ui.separator({ key = "sep-side", color = "outline", spacing = 8 }))
 
-	-- Hide stale cached history while signed out; reappears reactively once
-	-- cookies land and status flips to ready.
 	if state.logged_in() and type(data.recent_playlists) == "table" and #data.recent_playlists > 0 then
 		table.insert(
 			sidebar_items,

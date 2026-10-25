@@ -125,8 +125,6 @@ local function build_player_bar()
 						table.insert(stats, common.fmt_count(player.likes) .. " likes")
 					end
 					stats_text = table.concat(stats, " • ")
-					-- Always render the stats line so the column height is stable
-					-- and the artist label above it never shifts when stats arrive.
 					return ui.label({
 						text = (stats_text == "") and "\u{00A0}" or stats_text,
 						fontSize = theme.fontTitle,
@@ -209,7 +207,6 @@ local function build_player_bar()
 				controlSize = "sm",
 				onChange = function(v)
 					local num = tonumber(v)
-					-- Ignore programmatic onChange events (which echo back the current value)
 					if num and num ~= math.floor(position) then
 						view.seek_drag_state =
 							{ dragging = true, position = num, timestamp = os.time(), track_id = state.data.player.id }
@@ -239,8 +236,6 @@ local function build_player_bar()
 		vol_icon = "volume-2"
 	end
 
-	-- Build conditionally: a mid-array `cond and node or nil` leaves a nil
-	-- hole that the shell's ui-tree walker trips over every publish.
 	local pb_right = {}
 	if not state.data.online then
 		table.insert(

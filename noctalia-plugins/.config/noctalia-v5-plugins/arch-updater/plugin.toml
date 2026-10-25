@@ -9,8 +9,6 @@ description = "Check pacman, AUR and Flatpak updates, then upgrade in a terminal
 dependencies = ["pacman-contrib", "awk", "cat", "date", "flatpak", "grep", "head", "install", "kill", "less", "pacman", "paru", "pkexec", "rm", "sed", "sh", "sudo", "tail", "tee", "test", "uname", "wc", "xdg-open", "yay"]
 tags = ["arch", "bar", "panel", "launcher", "system", "utility"]
 
-# ── General ──────────────────────────────────────────────────────────────────
-
 [[setting]]
 key = "aur_helper"
 type = "select"
@@ -63,8 +61,6 @@ label_key = "settings.notify_on_updates.label"
 description_key = "settings.notify_on_updates.description"
 default = true
 
-# ── Extras ───────────────────────────────────────────────────────────────────
-
 [[setting]]
 key = "show_download_size"
 type = "bool"
@@ -102,8 +98,6 @@ default = 10
 min = 3
 max = 30
 visible_when = { key = "show_activity_graph", values = ["true"] }
-
-# ── Update run ───────────────────────────────────────────────────────────────
 
 [[setting]]
 key = "update_mode"

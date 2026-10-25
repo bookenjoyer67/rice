@@ -1,10 +1,3 @@
-# Desktop Cat - Bongo Cat living on your desktop as a desktop widget.
-#
-# A reimplementation of the official noctalia/bongocat idea as a
-# [[desktop_widget]] entry. Audio reactivity is driven by `cava` over
-# noctalia.runStream (Noctalia's onAudioSpectrum is a bar-widget-only callback,
-# not delivered to desktop widgets). Cat art/font reused from the official
-# noctalia/bongocat plugin (MIT; artwork by @StrayRogue).
 id = "computing/desktop-cat"
 name = "Desktop Cat"
 version = "1.0.0"

@@ -42,10 +42,6 @@ local function short_ver(name, detail)
 	return detail
 end
 
--- ── Status ───────────────────────────────────────────────────────────────────
--- One hero card that reads the connection state at a glance. Every state keeps
--- the same skeleton (glyph, title, message); only the tint and copy change.
-
 local function build_status_card()
 	local glyph, color, title = "login", "on_surface_variant", "Not connected"
 	local fill, border = "surface_variant/0.35", nil
@@ -108,9 +104,6 @@ local function build_status_card()
 	}, children)
 end
 
--- ── Steps ────────────────────────────────────────────────────────────────────
--- Numbered badges rather than bare lines, so the sequence reads as a sequence.
-
 local function build_steps()
 	local rows = {}
 	for i, text in ipairs(STEP_TEXTS) do
@@ -148,10 +141,6 @@ local function section_title(text)
 		color = "on_surface_variant",
 	})
 end
-
--- ── Browsers ─────────────────────────────────────────────────────────────────
--- A launchpad of tiles. Installed ones light up on hover, the one being used
--- shows a spinner, missing ones stay flat and dim.
 
 local function build_browser_cells()
 	local cells = {}
@@ -217,10 +206,6 @@ local function build_browser_grid()
 	end
 	return rows
 end
-
--- ── Health ───────────────────────────────────────────────────────────────────
--- A spec sheet: name on the left, version or failure reason on the right.
--- Returns nil until the first check has run.
 
 local function health_fill()
 	local h = state.data.health
@@ -296,9 +281,6 @@ local function health_card(rows)
 	}, rows)
 end
 
--- `heading` names the block when it is embedded in another page ("HEALTH
--- CHECK"); omitted, it reports its own verdict as the summary for the Health
--- tab. Returns nil until the first check has run.
 local function build_health_block(heading)
 	local rows, bad = health_fill()
 	if not rows then
@@ -320,8 +302,6 @@ local function build_health_block(heading)
 	}
 end
 
--- Health tab. Unlike the inline section this always renders: while the first
--- check is still running it shows the spinner instead of an empty tab.
 local function build_health_page()
 	local block = build_health_block(nil)
 	if block then
@@ -343,8 +323,6 @@ end
 local function spacer(height)
 	return ui.row({ key = "spacer-auth-" .. tostring(height), height = height, borderWidth = 0, radius = theme.radius })
 end
-
--- ── Pages ────────────────────────────────────────────────────────────────────
 
 local function build_cookies_page()
 	local page = {}
@@ -377,8 +355,6 @@ local function build_signin_prompt()
 		}),
 	})
 
-	-- Full width, otherwise the grid and the health block shrink to their
-	-- content inside the centred hero.
 	local body = {
 		ui.column(
 			{ key = "cookie-steps", gap = 10, align = "start", width = "fill", radius = theme.radius },

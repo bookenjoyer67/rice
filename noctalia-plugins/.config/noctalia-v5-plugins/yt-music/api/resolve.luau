@@ -1,7 +1,5 @@
 --!strict
 
--- stream resolution, audio download/cache, track stats, prefetch.
-
 local logger = require("../utils/log.luau")
 local log = logger.module("ytapi", "resolve")
 
@@ -15,9 +13,6 @@ local get_thumbnail_path = thumbs.get_thumbnail_path
 local types = require("../utils/types.luau")
 local network = require("../utils/network.luau")
 
--- yt-dlp is not guaranteed to be on noctalia's PATH: the compositor inherits
--- the systemd user environment, which may omit ~/.local/bin where pip puts it.
--- Resolve the binary once, preferring the explicit user-local install.
 local YTDLP_BIN = "yt-dlp"
 do
 	local home_bin = noctalia.expandPath("~/.local/bin/yt-dlp")
@@ -35,7 +30,6 @@ local function build_resolve_argv(safe_id: string): { string }
 		"--no-playlist",
 		"--no-warnings",
 	}
-	-- cookie jar intentionally NOT passed: see the note above resolve_stream.
 	table.insert(argv, "https://music.youtube.com/watch?v=" .. safe_id)
 	return argv
 end
@@ -101,7 +95,6 @@ function EXPO.cache_audio(video_id, callback)
 
 	noctalia.mkdirAll(AUDIO_DIR)
 	local argv = { YTDLP_BIN, "-f", "bestaudio/best", "-o", path }
-	-- cookie jar intentionally NOT passed: see the note above resolve_stream.
 	table.insert(argv, "https://music.youtube.com/watch?v=" .. safe_id)
 
 	local launched = network.runAsync(argv, function(res)
@@ -118,11 +111,6 @@ function EXPO.cache_audio(video_id, callback)
 	end
 end
 
--- Streams are resolved anonymously (no cookie jar). With account cookies the
--- player request comes back SABR/PO-token-gated with no direct format URLs, so
--- yt-dlp errors "Requested format is not available" / "page needs to be
--- reloaded". Guest resolution returns plain googlevideo URLs that mpv plays.
--- Cookies remain in use for library/metadata via InnerTube + SAPISIDHASH.
 function EXPO.resolve_stream(video_id: string, cb: ((string?) -> ())?)
 	if type(video_id) ~= "string" or video_id == "" then
 		if cb then
@@ -186,9 +174,6 @@ function EXPO.resolve_stream(video_id: string, cb: ((string?) -> ())?)
 	attempt_resolve(video_id, 0)
 end
 
--- Spawn the yt-dlp fetch for a video_id whose callback list is already parked
--- in resolving_in_flight. Attempt 0 is the first try; on host spawn refusal
--- (burst saturation from rapid skips) one delayed retry follows, then fail.
 attempt_resolve = function(video_id, attempt)
 	local safe_id = video_id:gsub("[^%w%-_]", "_")
 	log("resolving stream URL for id=" .. video_id)
@@ -219,8 +204,6 @@ attempt_resolve = function(video_id, attempt)
 			elseif type(res) == "table" and res.timedOut then
 				reason = "timed out"
 			elseif type(res) == "table" and (res.exitCode == 143 or res.exitCode == 137) then
-				-- SIGTERM/SIGKILL is our own supersede kill reaping a stale
-				-- fetch during rapid skips — expected, not an error.
 				reason = "superseded (stale fetch reaped)"
 			end
 			log("stream resolution " .. reason .. " (" .. elapsed_ms .. "ms) for id=" .. video_id)
@@ -232,12 +215,6 @@ attempt_resolve = function(video_id, attempt)
 		end
 	end, 30000)
 	if not launched and network.isOnline() then
-		-- Host refused the spawn: rapid skips fill every slot with stale
-		-- yt-dlp fetches, so the final song's resolve is the one refused and
-		-- its entry would wedge (UI loading forever + id poisoned). Retry once
-		-- after the burst drains; if that also fails, fail fast with nil so
-		-- the owner falls back to stopped instead of hanging. Offline needs
-		-- no handling: the net gate already scheduled its synthetic failure.
 		if attempt < 1 then
 			log("stream resolve launch refused for id=" .. video_id .. ", retrying")
 			local scheduled = noctalia.runAsync("sleep 1.5", function()
@@ -264,7 +241,6 @@ function EXPO.prefetch_track(item: types.Track)
 	if type(item) ~= "table" or not item.id or item.id == "" then
 		return
 	end
-	-- Prefetching is pure network work; skip entirely when offline.
 	if not network.isOnline() then
 		return
 	end
@@ -291,7 +267,6 @@ function EXPO.prefetch_queue(queue: { types.Track }, current_index)
 		return
 	end
 	current_index = current_index or 1
-	-- Only prefetch 1 track ahead to prevent thread pool exhaustion and UI freezing
 	for offset = 1, 1 do
 		local target = queue[current_index + offset]
 		if target and target.id and target.id ~= "" then

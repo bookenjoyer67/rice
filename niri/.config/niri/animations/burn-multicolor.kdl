@@ -1,6 +1,3 @@
-// Burn effect with 8 randomly selected ember colors
-// Colors: orange, blue, purple, green, pink, cyan, gold, deep red
-// See burn-README.md for customization guide
 
 animations {
     workspace-switch {

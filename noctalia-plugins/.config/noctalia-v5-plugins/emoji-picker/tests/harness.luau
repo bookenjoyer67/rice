@@ -1,12 +1,3 @@
--- Search/ranking/interaction tests for the emoji & symbol picker panel.
---
--- This file is the tail of a script assembled by build_test.py, which
--- prepends the REAL generated dataset as `local DATASET` and the verbatim
--- picker.luau source as `local PICKER_SRC`. It runs under the stock luau
--- CLI with the noctalia/ui/panel host APIs stubbed — picker.luau itself
--- is loaded unmodified except for an appended export tail (same-chunk
--- scope), so these tests exercise exactly the shipped search, keyboard
--- model and commit path.
 
 local failures = 0
 local passed = 0
@@ -41,11 +32,9 @@ local function entryByName(name)
   return nil
 end
 
--- ── Host API stubs ─────────────────────────────────────────────────────
 local copied = {}
 local closedPanel = 0
 local renderedTree = nil -- last tree handed to panel.render (ui nodes below)
--- Failure-injection flags read by the stubs at CALL time (see readFile).
 local fs = { fail = false, badJson = false, raiseDecode = false }
 noctalia = {
   nowMs = function()
@@ -55,10 +44,6 @@ noctalia = {
     return "" -- usage file disabled; in-memory usage still works
   end,
   readFile = function(p)
-    -- Behaviour is flag-driven, not stub-swapped: the stock luau CLI
-    -- sandbox snapshots a loadstring chunk's view of global-table fields
-    -- at chunk creation, so tests flip `fs.fail` instead of reassigning
-    -- this stub and every chunk (existing or future) sees the change.
     if fs.fail then
       return nil, "cannot open file"
     end
@@ -76,10 +61,6 @@ noctalia = {
           return nil, "bad json"
         end
         if fs.raiseDecode then
-          -- Mirror the host's CPU-budget interrupt: it raises a Luau
-          -- error from inside the binding at the next VM instruction,
-          -- which used to land inside a pcall and publish an EMPTY
-          -- dataset as if it were valid (#700).
           error("script callback 'chunk' exceeded its CPU budget", 0)
         end
         return DATASET
@@ -104,8 +85,6 @@ ui = setmetatable({}, {
   end,
 })
 panel = {
-  -- Flag/field-driven like the fs stubs above: every picker chunk must
-  -- see the SAME panel.render closure (chunk-time global snapshots).
   render = function(tree)
     renderedTree = tree
   end,
@@ -114,13 +93,6 @@ panel = {
   end,
 }
 
--- ── Load picker.luau with an export tail (runs in the same chunk scope,
--- so the module's locals are reachable). Note picker.luau loads the
--- dataset at chunk time now, so simply CONSTRUCTING the chunk performs
--- the full read → decode → index pass under the stubbed host. ──────────
--- The core now exports M.onOpen/M.onKey (the entry shims define the real
--- globals); the aliases below let the harness drive them by their old
--- global names.
 local CHUNK_TAIL = "\n\nonOpen = M.onOpen\nonKey = M.onKey\nreturn {\n"
   .. "  ensureData = ensureData,\n"
   .. "  loadUsage = loadUsage,\n"
@@ -160,9 +132,6 @@ local function freshPicker()
   return assert(loadstring(PICKER_SRC .. CHUNK_TAIL))()
 end
 
--- The shipped dataset must not carry the z blob (it is derived while
--- indexing). Checked BEFORE any picker chunk loads: indexing mutates the
--- shared DATASET tables in place by setting e.z on them.
 do
   local shipped = 0
   for _, e in ipairs(DATASET) do
@@ -173,15 +142,11 @@ do
   check(shipped == 0, "shipped dataset carries no z blobs")
 end
 
--- ── Emoji 18.0 additions: presence + the tone-variant dataset contract ──
 for _, name in ipairs({ "cracking face", "orca", "trombone", "lighthouse", "ballet dancer", "leftwards thumb sign" }) do
   check(entryByName(name) ~= nil, "dataset contains new emoji " .. name)
 end
 
 do
-  -- Tone variants ship as their own rows whose names carry the "skin
-  -- tone" marker picker.luau's browse filter keys on (searchable rows,
-  -- never browse-grid clutter) — assert the dataset contract only here.
   local allPresent = true
   for _, tone in ipairs({ "light", "medium-light", "medium", "medium-dark", "dark" }) do
     local row = entryByName("leftwards thumb sign: " .. tone .. " skin tone")
@@ -204,7 +169,6 @@ local function searchFor(q)
   return picker.search(0)
 end
 
--- ── Symbol queries: the named character ranks first ────────────────────
 local cases = {
   { "euro", "€" }, { "dollar", "$" }, { "pound", "£" }, { "yen", "¥" },
   { "rupee", "₹" }, { "ruble", "₽" }, { "bitcoin", "₿" },
@@ -224,7 +188,6 @@ local cases = {
   { "check", "✓" }, { "tick", "✓" }, { "cross", "✕" },
   { "nbsp", "\u{00A0}" }, { "command", "⌘" }, { "option", "⌥" },
   { "half", "½" }, { "squared", "²" }, { "celsius", "℃" },
-  -- Curated symbol waves from the Emoji 18.0 dataset refresh.
   { "maps to", "↦" }, { "mapsto", "↦" }, { "maps from", "↤" },
   { "long right arrow", "⟶" }, { "onto", "↠" }, { "equilibrium", "⇌" },
   { "caps lock", "⇪" }, { "return arrow", "↵" },
@@ -235,9 +198,6 @@ local cases = {
   { "rx", "℞" }, { "liter", "ℓ" }, { "estimated", "℮" }, { "telephone", "℡" },
 }
 
--- Broad queries keep surfacing the expected glyphs in the top results
--- after the curated waves: the new arrow/box symbols must find
--- themselves without crowding out the classics.
 do
   local res = searchFor("arrow")
   check(firstChar(res) == "↑", "arrow: up arrow stays first")
@@ -263,7 +223,6 @@ for _, case in ipairs(cases) do
   check(firstChar(searchFor(q)) == expected, ("query %q -> %s (got %s)"):format(q, expected, tostring(firstChar(searchFor(q)))))
 end
 
--- Ranking: € above euro-related emoji (💶 banknote, 🇪🇺 flag).
 do
   local res = searchFor("euro")
   check(res[1].e == "€" and res[1].s == 1, "euro: € is first and is a symbol")
@@ -272,24 +231,19 @@ do
   check(flag ~= nil and flag > 1, "euro: 🇪🇺 ranks below €")
 end
 
--- The symbol is first even when an emoji has the identical name
--- ("copyright" also names the ©️ emoji).
 do
   local res = searchFor("copyright")
   check(res[1].e == "©" and res[1].s == 1, "copyright: symbol © first")
   check(indexOf(res, "©️") ~= nil and indexOf(res, "©️") > 1, "copyright: ©️ emoji follows the symbol")
 end
 
--- Literal character queries find themselves.
 check(firstChar(searchFor("€")) == "€", "€ finds €")
 check(firstChar(searchFor("→")) == "→", "→ finds →")
 check(firstChar(searchFor("™")) == "™", "™ finds ™")
 
--- Normalisation: case-insensitive queries.
 check(firstChar(searchFor("PLUS MINUS")) == "±", "PLUS MINUS -> ±")
 check(firstChar(searchFor("Copyright")) == "©", "Copyright -> ©")
 do
-  -- Keyword-only emoji matches still work and rank naturally.
   local res = searchFor("ski")
   check(res[1] ~= nil and res[1].s ~= 1, "ski: emoji result first")
 end
@@ -300,7 +254,6 @@ do
   local pos = indexOf(res, "❤️")
   check(pos ~= nil and pos <= 3, "heart: ❤️ in top 3 (got " .. tostring(pos) .. ")")
 end
--- Collision sanity: heart/star/check orderings stay useful.
 do
   local res = searchFor("heart")
   check(indexOf(res, "♥") ~= nil and indexOf(res, "♥") <= 4, "heart: ♥ near top")
@@ -310,7 +263,6 @@ do
   check(indexOf(res, "▲") ~= nil and indexOf(res, "▲") <= 3, "triangle: ▲ near top")
 end
 
--- ── Interaction: symbols ride the same selection/commit path ───────────
 picker.setQuery("euro")
 picker.buildView()
 check(picker.getSel() == 1, "keyboard focus starts at 1")
@@ -327,7 +279,6 @@ do
   check(recent[1] ~= nil and recent[1].e == "€", "picked symbol becomes most recent")
 end
 
--- Browse: the Characters category is populated and rendered by buildView.
 do
   local ids = picker.categoryIds()
   local hasChars = false
@@ -344,11 +295,6 @@ do
   check(closedPanel == 1, "browse buildView keeps panel state intact")
 end
 
--- ── Tabs: the category strip is browse-only chrome ─────────────────────
--- The strip is a row of toggle buttons (All + the nine categories) mounted
--- above the grid while no query is active. Clicking a tab switches `cat`
--- and rebuilds the view: fresh grid scroll container (the tab opens at its
--- top), selection reset, Frequently Used re-pinned above the new section.
 local function keyOf(node)
   return node.opts ~= nil and node.opts.key or nil
 end
@@ -391,15 +337,10 @@ do
   picker.buildView()
   picker.render()
 
-  -- Default view: Frequently Used pinned above the smileys section.
   check(labelShown("Frequently Used"), "default view pins a Frequently Used section")
   check(labelShown("Smileys & People"), "default view shows the smileys section")
 
-  -- The strip is mounted in browse view: All + every category id.
   check(#findNodes(function(n) return keyOf(n) == "cats" end) == 1, "browse view mounts the category strip")
-  -- The strip centers by stretching across the content box and justifying
-  -- its buttons — no explicit width, so it shares the input's exact span
-  -- (review feedback: tabs must sit at the panel's center).
   local catsRow = findNodes(function(n) return keyOf(n) == "cats" end)[1]
   check(catsRow.opts.width == nil and catsRow.opts.justify == "center",
     "category strip spans the content box and centers its tabs")
@@ -422,7 +363,6 @@ do
   )
   check(byKey["all"] ~= nil and byKey["all"].opts.variant == "ghost", "unselected tabs use the ghost variant")
 
-  -- Clicking a tab switches cat and rebuilds the grid content.
   local scrollBefore = findNodes(function(n) return n.kind == "scroll" end)[1]
   local flagsTab = byKey["flags"]
   check(flagsTab ~= nil, "strip exposes the flags tab")
@@ -432,8 +372,6 @@ do
   check(picker.getCat() == "flags", "clicking the flags tab switches cat to flags")
   check(picker.getSel() == 1, "tab click resets the keyboard selection")
   check(labelShown("Flags"), "flags tab renders the Flags section")
-  -- Flag glyphs = pairs of regional indicators (U+1F1E6..U+1F1FF), which
-  -- share their first three UTF-8 bytes.
   local RI_PREFIX = string.sub("\u{1F1E6}", 1, 3)
   local flagTiles = 0
   for _, b in ipairs(findNodes(function(n)
@@ -462,8 +400,6 @@ do
     "selected tab follows the click"
   )
 
-  -- Search spans all categories: the strip disappears while a query is
-  -- active and comes back when the query clears.
   picker.setQuery("arrow")
   picker.buildView()
   picker.render()
@@ -475,8 +411,6 @@ do
   check(#tabButtons() == 10, "strip returns when the query clears")
 end
 
--- The root column is layout-only: the host-owned surface paints the card
--- chrome, so a root fill/radius would double-paint (the panel-ring fix).
 do
   check(renderedTree ~= nil and keyOf(renderedTree) == "root", "render mounts the root column")
   check(
@@ -485,12 +419,6 @@ do
   )
 end
 
--- ── Grid fit: a rendered row never runs under the overlay scrollbar ────
--- The ui.scroll scrollbar is an overlay (reserves no width) and ui.button
--- draws padding+border OUTSIDE its width/height content box, so the row
--- budget must cover the RENDERED tile width and reserve SCROLLBAR_GUTTER.
--- fitGrid guarantees that for every manifest panel width and every tier;
--- the rendered tree must then spend exactly what fitGrid derived.
 do
   check(picker.SCROLLBAR_GUTTER > 0, "scrollbar gutter is reserved (overlay scrollbar needs it)")
 
@@ -510,7 +438,6 @@ do
     end
   end
 
-  -- Entry width picks the tier: the entry shim is the size signal.
   check(
     picker.tierForWidth(780).cols == 9,
     "wide entry (780) gets 9 columns"
@@ -538,9 +465,6 @@ do
     cols == picker.fitGrid(avail, picker.GAP, picker.TIERS[1].cols, picker.TIERS[1].cell),
     "load-time grid derives cols from the narrowest manifest panel"
   )
-  -- Rendered rows must spend exactly the fit budget: tile nodes declare
-  -- the content box, so rendered tile = w + TILE_CHROME = gridCell, and
-  -- n tiles + gaps + gutter must fit the panel minus the root padding.
   local rows = findNodes(function(n)
     return n.kind == "row" and type(keyOf(n)) == "string" and string.find(keyOf(n), "^r%d+%-%d+$") ~= nil
   end)
@@ -586,18 +510,9 @@ do
   check(labelsOk, "section labels share the row box and stay left-aligned")
 end
 
--- ── Contract: search fields arrive pre-lowered/pre-indexed from the
--- generator, the z search blob is DERIVED (name + keywords + aliases —
--- the shipped dataset no longer carries it), and a COLD chunk-time load
--- stays well inside the host's 100ms script-load budget (callback
--- budget is 25ms; a decode that crosses it mid-pcall is exactly what
--- used to publish a permanently empty dataset, #700). ────────────────
 do
   local notLowered = 0
   for _, e in ipairs(DATASET) do
-    -- Luau's string.lower is ASCII-only while the Python generator uses
-    -- Unicode-aware lower-casing, so validate the generated index contract
-    -- structurally here; exact casing is covered in the Python tests.
     if type(e.l) ~= "string" then
       notLowered += 1
     end
@@ -637,10 +552,6 @@ do
   check(loadMs < 15, "cold chunk load indexing stays under 15ms")
 end
 
--- ── Load failures are never cached and are always observable (#700):
--- an unreadable dataset must leave the picker unloaded (never "loaded
--- but empty"), report why, keep search/buildView safe, and a later
--- attempt must be able to succeed. ─────────────────────────────────────
 do
   fs.fail = true
   local broken = freshPicker()
@@ -654,9 +565,6 @@ do
   check(malformed.getLoadError() == "bad json", "decode failure records the decoder's reason")
   fs.badJson = false
 
-  -- #700 regression: a budget interrupt raised from inside the decode
-  -- binding must not publish an empty dataset (the old code swallowed
-  -- exactly this error and then cached "loaded-but-empty" forever).
   fs.raiseDecode = true
   local throttled = freshPicker()
   check(not throttled.dataLoaded(), "budget-interrupted decode publishes no dataset")
@@ -673,18 +581,11 @@ do
   check(malformed.getLoadError() == "bad json", "decode failure records the decoder's reason")
   fs.badJson = false
 
-  -- The retry path: the same runtime recovers once the file reads again.
   broken.ensureData()
   check(broken.dataLoaded(), "ensureData retries after a failed load and recovers")
   check(broken.getLoadError() == nil, "a recovered load clears the error")
 end
 
--- Initialization is transactional. A failure halfway through indexing must
--- not publish partial state: that exact leak previously turned one onOpen
--- timeout into find(nil) on onChange and triggered Noctalia's auto-disable.
--- The dataset is corrupted BEFORE the chunk is built, so the chunk-time
--- load itself hits it; ensureData must swallow it (a chunk-level raise
--- would kill the whole script) yet leave every structure unpublished.
 do
   local saved = DATASET[50].e
   DATASET[50].e = nil
@@ -698,8 +599,6 @@ do
   check(fresh.dataReady(), "retry after mid-initialization failure recovers")
 end
 
--- ── Performance smoke: a full search over the dataset stays well inside
--- the host's 25ms per-keystroke budget. ────────────────────────────────
 do
   picker.setQuery("arrow")
   local t0 = os.clock()

@@ -1,14 +1,3 @@
-# NCS Visualizer - the NCS orb from spicetify-visualizer as a Noctalia desktop
-# widget, reacting to whatever your speakers play.
-#
-# The 103,684-dot orb is drawn on the GPU by a small companion renderer,
-# `aurora-ncs` (a dependency, built from the project repo - plugins can't ship
-# compiled code). This plugin is the Noctalia side:
-#   [[desktop_widget]] orb    - place / resize the orb in the desktop-widget editor
-#   [[service]] service       - starts and feeds the renderer, follows the theme
-#   [[shortcut]] toggle       - Control Center tile: show / hide the orb
-#
-# Settings are plugin-level and shared by every orb you place.
 
 id = "tausif/ncs-visualizer"
 name = "NCS Visualizer"
@@ -20,8 +9,6 @@ dependencies = ["aurora-ncs", "cava"]
 tags = ["audio", "desktop", "music"]
 icon = "wave-sine"
 description = "The NCS audio-visualizer orb on your desktop: 103k GPU-drawn dots that react to any audio, in your theme colours."
-
-# ── Colour ──────────────────────────────────────────────────────────────────
 
 [[setting]]
 key = "color_source"
@@ -93,8 +80,6 @@ min = 0.1
 max = 1.0
 step = 0.05
 
-# ── Look ────────────────────────────────────────────────────────────────────
-
 [[setting]]
 key = "dot_density"
 type = "select"
@@ -135,8 +120,6 @@ default = 1.0
 min = 0.0
 max = 2.5
 step = 0.05
-
-# ── Motion ──────────────────────────────────────────────────────────────────
 
 [[setting]]
 key = "motion_model"
@@ -191,8 +174,6 @@ options = [
   { value = "120", label_key = "settings.fps.options.120" },
 ]
 
-# ── Behaviour ───────────────────────────────────────────────────────────────
-
 [[setting]]
 key = "hide_when_idle"
 type = "bool"
@@ -220,8 +201,6 @@ options = [
   { value = "top", label_key = "settings.layer.options.top" },
 ]
 
-# ── Audio (advanced) ────────────────────────────────────────────────────────
-
 [[setting]]
 key = "audio_source"
 type = "string"
@@ -247,8 +226,6 @@ label_key = "settings.renderer_path.label"
 description_key = "settings.renderer_path.description"
 default = ""
 advanced = true
-
-# ── Entries ─────────────────────────────────────────────────────────────────
 
 [[service]]
 id = "service"

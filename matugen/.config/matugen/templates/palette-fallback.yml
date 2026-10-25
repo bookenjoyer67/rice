@@ -1,7 +1,3 @@
-# Hand-written fallback palette — used by yambar-monitor.sh only if
-# ~/.config/yambar/colors.yml (the matugen-generated one) is missing, e.g. on a
-# fresh checkout before the first wallpaper change has fired matugen.
-# Values are the palette that was hard-coded before colours went dynamic.
 c_bg: &c_bg "16131fe6"
 c_fg: &c_fg "f2f2f6ff"
 c_accent: &c_accent "ff2e88ff"

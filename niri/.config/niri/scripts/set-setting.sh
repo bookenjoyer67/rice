@@ -1,14 +1,4 @@
 #!/usr/bin/env bash
-# set-setting.sh — write one key in the settings file.
-#
-# The panel's NSFW slider and its resolution select call this instead of
-# writing the file themselves, so the commented template survives (Noctalia's
-# writeFile replaces the whole file) and the settings grammar has exactly one
-# implementation.
-#
-# Usage: set-setting.sh <key> <value>
-#   prints "<key>=<value>" on success; apikey prints "apikey=set" when a key is
-#   given and "apikey=cleared" when it is empty, never the key itself.
 set -euo pipefail
 
 DER="$(cd "$(dirname "$(readlink -f "$0")")" && pwd)"

@@ -1,15 +1,4 @@
 #!/usr/bin/env bash
-# Handler for text/calendar / text/x-vcalendar / application/x-zerosize:
-# import the given .ics into calcurse, then open the calendar UI.
-# Noctalia's calendar panel hands the event file here.
-#
-# Two calcurse quirks this has to work around:
-#   1. `calcurse -i <file>` imports and EXITS -- it does not drop into the TUI,
-#      so import and interactive start are two separate commands.
-#   2. calcurse keeps a pid lock at ~/.local/share/calcurse/.calcurse.pid and
-#      refuses to start while it exists, even if the recorded pid is long dead.
-#      A stale lock makes the kitty window vanish instantly, which looks exactly
-#      like "nothing happened".
 set -u
 
 file="${1:-}"
@@ -30,7 +19,6 @@ clear_stale_lock() {
   fi
 }
 
-# Another calcurse is already up: bring its window forward instead of failing.
 if running_pid >/dev/null; then
   wid=$(niri msg --json windows 2>/dev/null \
     | jq -r '.[] | select((.title // "") | test("Calcurse")) | .id' 2>/dev/null \
@@ -51,7 +39,6 @@ fi
 calcurse
 status=$?
 
-# Keep the window open if calcurse refused to start, so the reason is readable.
 if [ "$status" -ne 0 ]; then
   echo
   echo "calcurse exited with status $status"

@@ -1,12 +1,4 @@
 --!nonstrict
--- wallpaper-bars desktop widget.
---
--- One ui.box per spectrum band, bottom-aligned, tinted with the wallpaper
--- colour the service sampled behind that bar. With `blur` on, each bar is a
--- nested stack of translucent capsules so it melts into coloured mist. Bars
--- are frame-ticked and smoothed, and the tick loop shuts itself off when the
--- music stops (the service's level feed wakes it again), so an idle desktop
--- costs nothing.
 
 local function num(v, d)
   local n = tonumber(v)
@@ -22,7 +14,6 @@ local H = math.max(20, num(noctalia.getConfig("height"), 768))
 local GAP = math.max(0, num(noctalia.getConfig("gap"), 3))
 local RADIUS = math.max(0, num(noctalia.getConfig("radius"), 4))
 local MODE = noctalia.getConfig("color_mode") or "tip"
--- which output this widget sits on; empty falls back to a canvas-size match
 local MONITOR = noctalia.getConfig("monitor") or ""
 local BRIGHT = math.clamp(num(noctalia.getConfig("brightness"), 0.22), 0, 1)
 local SAT = math.clamp(num(noctalia.getConfig("saturation"), 1.35), 0, 3)
@@ -38,10 +29,6 @@ local BAR_W = math.max(1, (W - GAP * (N - 1)) / N)
 local BAR_R = math.min(RADIUS, BAR_W / 2)
 local ALPHA_HEX = string.format("%02x", math.floor(ALPHA * 255 + 0.5))
 
--- "Blur" is a simulated glow: ui.box has no gaussian blur, so each bar is a
--- nested stack of translucent capsules, faintest and widest on the outside.
--- One slider controls how narrow the solid core gets and how far the mist
--- reaches past the tip.
 local BLUR_ON = BLUR > 0.01
 local LAYERS = BLUR_ON and math.floor(4 + BLUR * 6) or 0
 local CORE_FRAC = 0.45 - 0.32 * BLUR
@@ -59,8 +46,6 @@ local LAYER_DH = {}
 local LAYER_R = {}
 local LAYER_ALPHA_HEX = {}
 if BLUR_ON then
-  -- Target visible alpha at each ring, core outward. Solving each layer's own
-  -- alpha from it keeps the falloff smooth instead of banded at the edge.
   local profile = {}
   for j = 0, LAYERS do
     local t = j / LAYERS
@@ -89,8 +74,6 @@ for i = 1, N do
   levels[i] = 0
   targets[i] = 0
 end
-
--- ---------------------------------------------------------------- colour
 
 local function rgbToHsv(r, g, b)
   local maxc = math.max(r, g, b)
@@ -135,8 +118,6 @@ local function hsvToRgb(h, s, v)
   return v, p, q
 end
 
--- Lift/saturate a wallpaper colour just enough that the bar reads against the
--- very pixels it was sampled from.
 local function tint(rgb)
   local r = (rgb // 65536) % 256 / 255
   local g = (rgb // 256) % 256 / 255
@@ -154,9 +135,6 @@ end
 
 local FALLBACK = { "#8fd6ff", "#a9b8ff", "#d0b3ff", "#ffc6e0" }
 local fallbackI = 0
--- Colour strings are the expensive part of a frame (HSV math + formatting), and
--- a bar keeps the same sampled pixel for many frames: cache per bar until the
--- row it points at changes.
 local colorCache = {}
 
 local function barColor(i, level)
@@ -166,8 +144,6 @@ local function barColor(i, level)
   end
   local rows = tonumber(grid.rows) or 1
   local cols = tonumber(grid.cols) or N
-  -- map this bar onto the sampled columns proportionally, so a widget whose
-  -- band count was changed on its own still lines up with the wallpaper
   local col = math.floor((i - 0.5) / N * cols) + 1
   col = math.clamp(col, 1, cols)
 
@@ -175,10 +151,8 @@ local function barColor(i, level)
   if MODE == "floor" then
     row = rows
   elseif MODE == "body" then
-    -- middle of the drawn bar
     row = 1 + math.floor((1 - level * 0.5) * (rows - 1) + 0.5)
   else
-    -- tip of the bar: the colour climbs the image with the music
     row = 1 + math.floor((1 - level) * (rows - 1) + 0.5)
   end
   row = math.clamp(row, 1, rows)
@@ -194,8 +168,6 @@ local function barColor(i, level)
   colorCache[i] = { key = key, hex = hex }
   return hex
 end
-
--- ---------------------------------------------------------------- render
 
 local BAR_SPAN = math.max(0, BAR_MAX - MIN_BAR)
 local lastHeights = {}
@@ -220,7 +192,6 @@ local function barNode(i, h, level)
     radius = CORE_R,
     fill = color .. CORE_ALPHA_HEX,
   })
-  -- A quiet band gets a small halo, a loud one the full spread.
   local reach = 0.2 + 0.8 * level
   for j = 1, LAYERS do
     node = ui.column({
@@ -233,9 +204,6 @@ local function barNode(i, h, level)
       justify = "end",
     }, { node })
   end
-  -- The wrapper reserves exactly one band slot; the halo is allowed to spill
-  -- over the gaps and into neighbouring slots, which is what turns separate
-  -- bars into a continuous mist.
   return ui.column({
     key = "b" .. i .. "w",
     width = BAR_W,
@@ -279,8 +247,6 @@ local function setTicking(on)
   end
 end
 
--- ---------------------------------------------------------------- state
-
 local function maxOf(t)
   local m = 0
   for i = 1, N do
@@ -296,10 +262,6 @@ noctalia.state.watch("levels", function(value)
   if type(value) ~= "table" then
     return
   end
-  -- One cava feeds every widget, so a widget whose own band count differs from
-  -- the feed (a per-instance override, a stale pin) must spread itself over the
-  -- whole spectrum instead of reading the first feed bands and going dead past
-  -- them. Feed == N is the normal case and maps 1:1.
   local feed = #value
   local spread = feed > 0 and feed ~= N
   for i = 1, N do
@@ -316,8 +278,6 @@ noctalia.state.watch("levels", function(value)
   end
 end)
 
--- the service publishes one grid per output; take ours by monitor name, else
--- the one whose output geometry matches this canvas
 local function pickGrid(all)
   if type(all) ~= "table" then
     return nil
@@ -385,7 +345,6 @@ function onFrameTick(deltaMs)
   render()
 end
 
--- seed the first frame (grids may still be empty for a moment)
 grid = pickGrid(noctalia.state.get("grids"))
 noctalia.log(string.format("wallpaper-bars: canvas %dx%d bands=%d gap=%.1f monitor='%s' grid=%s", W, H, N, GAP, MONITOR,
   grid and (tostring(grid.cols) .. "x" .. tostring(grid.rows)) or "none"))

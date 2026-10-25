@@ -25,8 +25,6 @@ local EXPO = {}
 
 local PLAYLISTS_PARAMS = "EgeKAQQoADgBKAI6AklTUAFQBRAFEAkQBA%3D%3D"
 
--- Featured-playlist search paginates via shelf continuation tokens; a single
--- page only carries ~5 rows.
 function EXPO.search_playlists(q: string, count: number, cb: ({ types.SearchResult }?, string?) -> ())
 	local out: { types.SearchResult } = {}
 	local seen: { [string]: boolean } = {}

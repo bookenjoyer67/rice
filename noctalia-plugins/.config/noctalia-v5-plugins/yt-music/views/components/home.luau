@@ -214,9 +214,6 @@ local function build_home()
 		end
 	end
 
-	-- YOUR LIBRARY section temporarily hidden for speed test (its separator went with it)
-	-- table.insert(feed, ui.label({ text = "YOUR LIBRARY", fontSize = theme.fontHeading, fontWeight = "bold", color = "on_surface_variant" }))
-
 	return feed
 end
 

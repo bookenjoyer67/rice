@@ -1,16 +1,4 @@
 --!nonstrict
--- Desktop Cat - Bongo Cat living on your desktop.
---
--- Idles, blinks, sleeps, and slaps its paws to the beat. Audio reactivity uses
--- `cava` over noctalia.runStream, because Noctalia's onAudioSpectrum callback is
--- only delivered to BAR widgets, not desktop widgets. Animation is driven by
--- onFrameTick (desktop widgets do not get a plain update() loop unless a tick
--- mode is requested).
---
--- Cat art/font reused from the official noctalia/bongocat plugin (MIT; artwork
--- by @StrayRogue). Font glyph map:
---   b=left paw up, d=left paw down, c=right paw up, a=right paw down
---   bc=idle, dc=left slap, ba=right slap, da=both slap, ef=sleep, gh=blink
 
 local TICK_MS = 50 -- animation step (matches the bar cat's cadence)
 
@@ -50,8 +38,6 @@ local beatCooldownTicks, raveFlashTicks = 0, 0
 
 local lastGlyph, lastColor = nil, nil
 
--- ── Rendering ──────────────────────────────────────────────────────────────
-
 local function currentGlyph()
   if paused or waiting then return SLEEP_GLYPH end
   if blinking then return BLINK_GLYPH end
@@ -71,8 +57,6 @@ local function render(force)
   local labelProps = { text = g, baseline = "pictographic", fontSize = GLYPH, color = c }
   if catFont ~= nil then labelProps.fontFamily = catFont end
 
-  -- BOX is larger than the glyph so the sprite is never clipped; fully
-  -- transparent so nothing but the cat is drawn on the desktop.
   desktopWidget.render(ui.column({
     width = BOX,
     height = BOX,
@@ -84,8 +68,6 @@ local function render(force)
     ui.label(labelProps),
   }))
 end
-
--- ── State machine ──────────────────────────────────────────────────────────
 
 local function beatTap(isBigHit)
   if paused then return end
@@ -144,8 +126,6 @@ local function tick()
     end
   end
 end
-
--- ── Audio (cava → runStream) ───────────────────────────────────────────────
 
 local CAVA_CONF = [==[
 [general]
@@ -239,8 +219,6 @@ local function startAudio()
   end
 end
 
--- ── Public callbacks ───────────────────────────────────────────────────────
-
 function onCatClick()
   paused = not paused
   if not paused then
@@ -276,8 +254,6 @@ function onFrameTick(deltaMs)
     steps += 1
   end
 end
-
--- ── Init ───────────────────────────────────────────────────────────────────
 
 desktopWidget.setNeedsFrameTick(true)
 startAudio()

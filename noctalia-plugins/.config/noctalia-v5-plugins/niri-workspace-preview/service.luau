@@ -1,7 +1,4 @@
 --!nonstrict
--- Maintains a normalized in-memory view of Niri workspaces and windows.
--- Niri's event stream sends complete initial state followed by incremental
--- changes, so normal operation needs one long-lived process and no polling.
 
 local STATE_KEY = "workspace_preview_snapshot"
 local RECONNECTING_STREAM = [[

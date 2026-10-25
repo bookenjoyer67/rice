@@ -1,8 +1,4 @@
 --!nonstrict
--- Entry shim for the `desktop` [[panel]] (640 logical): the shared picker
--- cannot see which entry the host instantiated (the plugin API exposes no
--- size or entry id), so the shim IS the size signal. Keep in step with the
--- manifest's width for this entry (tests/build_test.py checks the pair).
 local picker = require("./picker.luau")
 
 function onOpen(_context)

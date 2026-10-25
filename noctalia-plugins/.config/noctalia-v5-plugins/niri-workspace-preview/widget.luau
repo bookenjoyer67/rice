@@ -1,6 +1,4 @@
 --!nonstrict
--- Draws a compact, proportional map of every active Niri workspace. This is a
--- schematic made only from IPC metadata; it never captures window contents.
 
 local STATE_KEY = "workspace_preview_snapshot"
 local VIEWPORT_STATE_KEY = "workspace_preview_viewports"
@@ -98,8 +96,6 @@ local function selectedOutputs()
     if #selected > 0 then return selected end
   end
 
-  -- Older hosts may not expose the bar connector. Prefer the compositor's
-  -- focused output, then the first physical output, instead of blanking.
   for _, output in ipairs(outputs) do
     if output.focused == true then return { output } end
   end
@@ -342,9 +338,6 @@ local function windowNode(window, width, height, floating, clickable, borderOver
     onHover = hover,
   }
   if icon == nil then
-    -- Flex containers are not reliable independent hit targets when several
-    -- tiny siblings share one column. A leaf box keeps each stacked window's
-    -- click region separate even when there is no room for an icon.
     props.align = nil
     props.justify = nil
     return ui.box(props)
@@ -571,7 +564,6 @@ local function exactFloatingNode(output, windows, width, height, activeWindowId)
         if #focusableIds == 0 then return end
         local cursor = (exactFocusCursor[outputKey] or 0) % #focusableIds + 1
         exactFocusCursor[outputKey] = cursor
-        -- Later windows are normally newer and visually above earlier ones.
         focusWindow(focusableIds[#focusableIds - cursor + 1])
       end,
     })
@@ -654,11 +646,8 @@ local function visibleViewportWindows(windows, outputWidth, activeWindowId, stat
 
   local endOrder = rangeEnd(startOrder)
   if focusedOrder < startOrder then
-    -- Match Niri's minimal scrolling when focus crosses the left edge.
     startOrder = focusedOrder
   elseif focusedOrder > endOrder then
-    -- Keep the focused column at the right side while retaining as many
-    -- preceding columns as fit, rather than rebuilding from the left.
     startOrder = focusedOrder
     local used = widths[order[focusedOrder]]
     while startOrder > 1 and outputWidth - used > edgeTolerance do
@@ -911,10 +900,6 @@ noctalia.setUpdateInterval(RENDER_TICK_MS)
 
 noctalia.state.watch(STATE_KEY, function(value)
   snapshot = value
-  -- Niri emits layout updates at pointer frequency while moving/resizing a
-  -- floating window. Keep the last valid tree visible and render only the
-  -- newest snapshot after the burst settles; replacing SVG paths on every
-  -- event makes the host briefly display an unloaded image.
   renderDueAt = noctalia.nowMs() + EVENT_SETTLE_MS
 end)
 

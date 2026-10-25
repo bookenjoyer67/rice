@@ -1,17 +1,4 @@
 --!nonstrict
--- arch-updater bar widget: pending-update badge and panel toggle.
---
--- Pure renderer over the "arch_state" the engine (service.luau) publishes.
--- Every bar showing the widget agrees on the count without running any
--- command itself. Actions go back as "arch_request" entries, so one engine
--- owns the checks and the update run no matter how many widgets exist.
---
--- Click mapping:
---   Left click:  open/close the panel
---   Right click: check for updates now
---
--- No middle-click handler: the host already binds it to the widget's own
--- settings, so a callback here would be dead code.
 
 local PANEL_ID = "yuuto/arch-updater:panel"
 local REQUEST_KEY = "arch_request"
@@ -35,7 +22,6 @@ local function pending()
         and (snapshot.total or 0) > 0
 end
 
--- "Pacman 12 · AUR (yay) 3 · Flatpak 1": non-zero sources only.
 local function breakdown()
     if snapshot == nil then
         return ""
@@ -101,7 +87,6 @@ local function render()
 
     if phase == "running" and snapshot ~= nil and type(snapshot.progress) == "table"
         and (tonumber(snapshot.progress.total) or 0) > 0 then
-        -- Live progress replaces the count while the background run is going.
         local done = tonumber(snapshot.progress.done) or 0
         local expect = tonumber(snapshot.progress.total) or 1
         barWidget.setText(tostring(math.min(math.floor(done / expect * 100), 100)) .. "%")
@@ -139,8 +124,6 @@ noctalia.state.watch(STATE_KEY, function(value)
     end
 end)
 
--- Periodic re-render keeps the glyph/visibility in sync with widget-setting
--- edits, which do not move the engine's state.
 function update()
     render()
 end

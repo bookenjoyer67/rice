@@ -1,14 +1,4 @@
 --!nonstrict
--- Desktop clock: 12-hour time, weekday and date, rendered as an SVG image so
--- the glyphs can carry a real outline. Noctalia's ui.label has no
--- text-shadow/stroke, so paint-order="stroke fill" in SVG replaces the
--- eight-offset text-shadow halo the eww clock used.
---
--- Colours come from the live palette via noctalia.getColor(), so the fill and
--- the outline follow the wallpaper like the rest of the shell.
---
--- Click runs the same calcurse script the old yambar bar clock (and the eww
--- clock button) opened.
 
 local HOME = noctalia.getenv("HOME") or ""
 local CALENDAR = HOME .. "/.local/bin/calendar.sh"
@@ -19,14 +9,10 @@ local OUTLINE_W = 4   -- ~the eww 2px text-shadow halo, doubled for a stroke
 local SUB_OUTLINE_W = 2
 local VERSION = "v4"  -- bump when the drawn layout changes (frame cache key)
 
--- one file per distinct frame; only the newest few are kept on disk
 local CACHE_DIR = (noctalia.pluginDataDir() or "/tmp/noctalia-clock") .. "/frames"
 local KEEP = 5
 
 local lastKey
--- Palette signature, tracked separately from the time key: a wallpaper/theme
--- change mid-minute leaves the cached frame painted in the old colours until
--- the next minute tick, so the clock visibly lags the rest of the shell.
 local lastPaletteKey
 
 local function esc(s)
@@ -37,8 +23,6 @@ local function colorKey(hex)
   return (tostring(hex):gsub("#", ""))
 end
 
--- Live palette signature; empty string when the shell has no colour yet, so a
--- palette that arrives later still counts as a change.
 local function paletteKey()
   return table.concat({
     colorKey(noctalia.getColor("tertiary") or ""),
@@ -107,15 +91,9 @@ local function render()
 end
 
 function onClockClick()
-  -- calcurse is where events are edited (the shell's calendar is read-only);
-  -- the script focuses an already-open instance or spawns one in kitty.
-  -- The control-center calendar tab stays reachable from the bar clock's
-  -- left click, which is hardcoded to `panel-toggle control-center calendar`.
   noctalia.runAsync({ HOME .. "/.local/bin/calcurse-launch.sh" })
 end
 
--- programmatic trigger (same code path as the click, for testing):
---   noctalia msg plugin computing/desktop-essentials:clock all calcurse
 function onIpc(event, _payload)
   if event == "calcurse" then
     onClockClick()
@@ -133,8 +111,6 @@ function update()
     lastPaletteKey = palette
     render()
     frames += 1
-    -- a wallpaper flip can churn several frames within one minute, so collect
-    -- on those too instead of waiting for the next 60-render sweep
     if paletteOnly or frames % 60 == 0 then prune() end
   end
 end

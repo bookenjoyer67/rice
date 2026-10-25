@@ -1,8 +1,3 @@
-# Noctalia v5 bar config (mirror of the effective settings.toml [bar.default]).
-# NOTE: ~/.local/state/noctalia/settings.toml loads LAST and WINS on conflicts.
-# Keep this in sync so the rice is reproducible from dotfiles.
-# Widgets: built-ins by name; plugins by "<author>/<plugin>:<entry>";
-# a capsule group is referenced as "group:<id>".
 
 [bar]
 order = ["default"]
@@ -22,7 +17,6 @@ end = [
   "session",
 ]
 
-# network/bluetooth/volume collapse into one capsule, unfold on hover
 [[bar.default.capsule_group]]
 id = "g1"
 members = ["network", "bluetooth", "volume"]
@@ -31,7 +25,6 @@ border = "outline"
 accordion = true
 widget_spacing = 8
 
-# The TV (HDMI-A-1) gets its own larger, trimmed layout; laptop (eDP-1) uses the default above.
 [bar.default.monitor."HDMI-A-1"]
 scale = 1.25
 thickness = 22

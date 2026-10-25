@@ -1,7 +1,5 @@
 local QueueOrder = {}
 
--- `to` is a slot in 1..#list+1 (slot k = just above entry k). Returns the new
--- position, or nil when the drop is a no-op or out of range.
 function QueueOrder.move(list, from, to)
 	from = math.floor(tonumber(from) or 0)
 	to = math.floor(tonumber(to) or 0)
@@ -17,7 +15,6 @@ function QueueOrder.move(list, from, to)
 	return insert_at
 end
 
--- New playing index: it follows the track, not the slot.
 function QueueOrder.follow(index, from, insert_at)
 	local cur = tonumber(index) or 0
 	if cur == from then

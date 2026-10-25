@@ -2,8 +2,6 @@ local schema = require("../utils/schema.luau")
 
 local STATE_KEY = "yt_music.state"
 
--- Service-side singleton state. Only the service (and its domain modules)
--- require this; the panel uses schema.new() for its own read-only view.
 local Store = {}
 Store.state = schema.new()
 Store.state.player.volume = 100
@@ -16,7 +14,6 @@ function Store.publish()
 	for k, v in pairs(Store.state) do
 		snap[k] = v
 	end
-	-- Only shallow-copy the actively-mutated tables (player, playlist)
 	if type(Store.state.player) == "table" then
 		snap.player = {}
 		for k, v in pairs(Store.state.player) do

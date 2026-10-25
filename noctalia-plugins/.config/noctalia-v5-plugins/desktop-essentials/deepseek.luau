@@ -1,10 +1,4 @@
 --!nonstrict
--- Desktop DeepSeek rate widget: peak/off-peak period, USD/M price, the countdown
--- to the next switch and the account's remaining balance, all from
--- ~/.local/bin/deepseek_price.sh (the script the old eww deepseek widget polled
--- every 60s; it now also reports the /user/balance figure, cached 5 min inside
--- the script). Re-polled once a minute so the countdown matches what eww showed;
--- click forces a fresh poll (balance cache bypassed).
 
 local HOME = noctalia.getenv("HOME") or ""
 local SCRIPT = HOME .. "/.local/bin/deepseek_price.sh"

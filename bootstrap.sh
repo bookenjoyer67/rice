@@ -1,22 +1,4 @@
 #!/usr/bin/env bash
-# ---------------------------------------------------------------------------
-# niri / Noctalia rice — one-command onboarding for a fresh Arch install
-#
-#   curl -fsSL https://raw.githubusercontent.com/bookenjoyer67/rice/main/bootstrap.sh | bash
-#
-# Fetches the repo, installs every package it needs, mirrors the configs into
-# $HOME, builds the LD_PRELOAD shim, installs the greetd/tuigreet configuration
-# and enables the greeter. Safe to rerun: every step is idempotent.
-#
-#   ... | bash                 full install (packages + configs + system greeter)
-#   ... | bash -s -- --dry-run show every action, touch nothing
-#   ... | bash -s -- --reboot  reboot into the greeter when it is done
-#   ... | bash -s -- --no-system
-#                              skip /etc/greetd + /etc/tuigreet + greetd
-#
-# Any other argument is passed straight through to install.sh (--no-deps,
-# --no-shim, ...). The system stage only runs when no argument was passed.
-# ---------------------------------------------------------------------------
 set -euo pipefail
 
 REPO_URL="${RICE_REPO_URL:-https://github.com/bookenjoyer67/rice.git}"
@@ -38,17 +20,11 @@ for arg in "$@"; do
   esac
 done
 
-# --- preflight -------------------------------------------------------------
-# makepkg refuses to build as root and the configs are linked into $HOME, so
-# the whole install has to run as the user who will own the desktop.
 [ "$(id -u)" -ne 0 ] || die "run this as your user, not root (it links into \$HOME and builds AUR packages)."
 command -v pacman >/dev/null 2>&1 || die "no pacman: this bootstrapper targets Arch."
 command -v sudo   >/dev/null 2>&1 || die "no sudo: install it, or run the steps in the README by hand."
 sudo -n true 2>/dev/null || say "sudo will ask for your password."
 
-# --- git -------------------------------------------------------------------
-# git is in extra, not in base, and the archiso live environment does not ship
-# it either: a fresh install cannot clone anything until this runs.
 if ! command -v git >/dev/null 2>&1; then
   say "==> git is not installed (a fresh Arch install does not include it)"
   sudo pacman -S --needed --noconfirm git \
@@ -56,10 +32,6 @@ if ! command -v git >/dev/null 2>&1; then
          sudo pacman -S --needed --noconfirm git; }
 fi
 
-# --- fetch -----------------------------------------------------------------
-# A full clone, not --depth 1: a shallow checkout cannot fast-forward onto new
-# upstream commits later ("refusing to merge unrelated histories"), which breaks
-# the rerun this bootstrapper is documented to be safe for.
 if [ -d "$DEST/.git" ]; then
   say "==> updating $DEST (fast-forward only; local changes are never touched)"
   if [ -f "$DEST/.git/shallow" ]; then
@@ -80,24 +52,18 @@ fi
 
 cd "$DEST"
 
-# --- install ---------------------------------------------------------------
 say ""
 say "==> ./install.sh ${PASSTHROUGH[*]:-}"
 ./install.sh ${PASSTHROUGH[@]+"${PASSTHROUGH[@]}"}
 
-# The system stage is skipped for dry runs and partial runs on purpose: it
-# writes /etc and would enable the greeter on a box that was not fully linked.
 if [ "$SYSTEM" -eq 1 ] && [ "${#PASSTHROUGH[@]}" -eq 0 ]; then
   say ""
   say "==> /etc/greetd + /etc/tuigreet (sudo)"
-  # HOME is preserved so the installer's own mirroring pass is a no-op here:
-  # every link already exists from the user run above.
   sudo env HOME="$HOME" ./install.sh --with-system
   say "==> enabling greetd"
   sudo systemctl enable greetd
 fi
 
-# --- what is left ----------------------------------------------------------
 say ""
 say "Done."
 say ""

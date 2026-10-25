@@ -1,29 +1,5 @@
 --!nonstrict
--- Emoji & symbol picker panel — Raycast-inspired browser for Noctalia.
---
--- One script serves the three [[panel]] entries in plugin.toml (wide /
--- desktop / compact): the surface size is manifest-owned, the grid tier
--- (columns / cell / glyph size) is derived here from the FOCUSED output's
--- logical width. Dataset: assets/emoji.json (committed data generated
--- from pinned Unicode CLDR + UnicodeData sources — see tools/ and
--- README.md). Usage state lives in pluginDataDir()/usage.json.
---
--- The dataset has two entry types sharing this whole UI — search, grid,
--- keyboard, recents, copy/paste — keyed apart by the s field:
---   * emoji  (s absent): CLDR names + keywords
---   * symbol (s == 1):   plain Unicode characters (€ ± → … π) with
---     name-class aliases (a) — "arrow right", "plusminus", "gbp" — so a
---     query that names a symbol ranks the symbol itself at the top
---     instead of a pile of semantically related emoji. See wordTier.
---
--- Keyboard model (see plugin.toml capture_keys):
---   * typing goes to the focused search input (the host routes plain
---     printable keys there before consulting capture keys),
---   * arrows + Enter are captured and handled by onKey below,
---   * Escape is reserved by the host and simply closes the panel.
 
--- ── Categories (order = browse order; glyphs validated against the
--- shell's bundled tabler.json) ─────────────────────────────────────────
 local CATEGORIES = {
   { id = "smileys",  label = "Smileys & People", glyph = "mood-smile" },
   { id = "animals",  label = "Animals & Nature", glyph = "paw" },
@@ -38,11 +14,6 @@ local CATEGORIES = {
 
 local M = {}
 
--- Layout tiers, one per [[panel]] entry (panel = that entry's manifest
--- width in plugin.toml — the entry IS the size signal; see the Layout note
--- below). cols/cell are the PREFERRED grid; fitGrid below re-derives the
--- effective values from the panel width actually available (rendered tile
--- size included).
 local TIERS = {
   { cols = 9, cell = 72, glyph = 34, panel = 780 }, -- wide
   { cols = 8, cell = 66, glyph = 30, panel = 640 }, -- desktop
@@ -51,30 +22,11 @@ local TIERS = {
 
 local GAP = 6
 
--- Grid fit constants. TILE_CHROME is the out-of-box width ui.button adds
--- to its declared width/height — measured 2026-10-12 as ZERO: a tile
--- declaring 66 logical renders 83px at scale 1.25 (≈66.4 logical, border
--- included) and rows pitch at cell+GAP, so the button paints its padding
--- and border WITHIN the declared box. Kept as a knob only in case a theme
--- ever adds out-of-box chrome; budgeting it non-zero silently costs whole
--- columns (it did: 5 → 4 on compact). The ui.scroll scrollbar is an
--- overlay that reserves no width, so rows reserve SCROLLBAR_GUTTER — the
--- rows are inset half of it on each side (scroll paddingH), which keeps
--- the left/right margins equal while the right inset always clears the
--- overlay scrollbar.
 local TILE_CHROME = 0
 local SCROLLBAR_GUTTER = 24
 local ROOT_PADDING = 8
--- The host-owned card also insets the plugin content around the root
--- column (measured live 2026-10-12: card 600px, root box 560px at scale
--- 1.25 → 16 logical per side). The fit budget must subtract BOTH insets,
--- or rows can overflow the real content box into the scrollbar band.
 local HOST_PADDING = 16
 
--- Pure row-fit math: given the content width actually available (panel
--- width minus the host card inset minus root padding) and a preferred
--- (cols, cell) pair, return the (cols, cell) to render. Always satisfies
---   cols*cell + (cols-1)*gap + SCROLLBAR_GUTTER <= availableWidth
 local function fitGrid(availableWidth, gap, wantCols, wantCell)
   local budget = availableWidth - SCROLLBAR_GUTTER
   local cell = wantCell + TILE_CHROME
@@ -82,29 +34,15 @@ local function fitGrid(availableWidth, gap, wantCols, wantCell)
   if cols < 1 then
     cols = 1
   end
-  -- Grow the tile to fill the row area: preferred cells under-fill the
-  -- available width and leave fat margins around the grid (compact: 5
-  -- tiles of 66 in a 392-wide row area). The fill is always >= the
-  -- preferred cell (the col count above only shrinks), so tiles never
-  -- get smaller than the tier asked for — margins just go to ~zero.
   cell = math.floor((budget - (cols - 1) * gap) / cols)
   return cols, cell
 end
 
--- ── Layout ──────────────────────────────────────────────────────────────────
--- Each [[panel]] entry binds this module through a tiny shim (wide.luau /
--- desktop.luau / compact.luau) that passes its manifest width: the entry IS
--- the size signal. (The API offers none — panel.* has no size query,
--- togglePanel takes no context, and onOpen's context is the USER's string —
--- so guessing from the focused output only pairs correctly when the bound
--- entry matches the output and misfits everywhere else: the wide entry on a
--- 2304-logical output rendered 5 columns and a massive margin.)
 local PANEL_WIDTH_BY_ID = { wide = 780, desktop = 640, compact = 480 }
 local fitWidth = PANEL_WIDTH_BY_ID.compact -- replaced by the shim's width at onOpen
 local MAX_SEARCH_RESULTS = 300
 local RECENCY_HALF_LIFE_DAYS = 14.0
 
--- ── State ──────────────────────────────────────────────────────────────
 local data = nil -- dataset array; published only by a fully successful load
 local byCat = nil -- { [catId] = {entry, …} } browse list (no skin-tone variants)
 local emojiIndex = nil -- { [emoji] = entry }
@@ -114,12 +52,6 @@ local usagePath = nil
 
 local tier = TIERS[1]
 
--- Effective grid geometry for the current (fitWidth, tier) pair — gridCell
--- is the tile's declared width (== rendered width; see TILE_CHROME above).
--- gridRowWidth is the row AREA width (content minus the reserved gutter):
--- rows are sized to it and `justify = "center"` keeps the left/right
--- margins equal. Derived once at load and re-derived by applyGridFit()
--- whenever fitWidth or tier changes (pickTier/onOpen).
 local gridCols, gridCell, gridRowWidth
 local function applyGridFit()
   local avail = fitWidth - 2 * (HOST_PADDING + ROOT_PADDING)
@@ -136,17 +68,10 @@ local rows = {} -- { { base = first item index, len = n }, … }
 local rowOfItem = {} -- item index -> row index
 local sel = 0 -- focused item index into `items` (0 = none)
 
--- Incremental rendering: building all of "items" as UI nodes on the first
--- open (up to ~560 tiles for one category) is the dominant cost of open
--- latency, so the grid renders only the first `renderLimit` ROWS and grows
--- as the user scrolls near the bottom (onScroll below) or arrows past the
--- rendered edge (ensureRowRendered). `rows`/`rowOfItem` above stay full —
--- keyboard math always sees the true layout — only the UI TREE is capped.
 local INITIAL_RENDER_ROWS = 8
 local RENDER_ROWS_STEP = 10
 local renderLimit = INITIAL_RENDER_ROWS
 
--- ── Data & frecency ────────────────────────────────────────────────────
 local function nowSec()
   return noctalia.nowMs() / 1000.0
 end
@@ -185,8 +110,6 @@ local function saveUsage()
   end
 end
 
--- Frequency with a recency decay: each pick counts, but a pick from last
--- month is worth far less than one from today.
 local function frecencyScore(count, lastUsed, now)
   if count <= 0 then
     return 0.0
@@ -203,13 +126,6 @@ local function frecency(emoji, now)
   return frecencyScore(u.c, u.t, now)
 end
 
--- A load attempt either publishes a complete dataset or NOTHING: every
--- failure path (unreadable file, malformed JSON, a CPU-budget overrun
--- mid-decode — the host's budget interrupt raises a Luau error at the
--- next VM instruction, which lands inside the pcall below) leaves
--- data == nil, records why in loadError, and is retried on the next
--- onOpen. Publishing an empty dataset as if it were valid used to cache
--- "No results" permanently after one slow first open (#700).
 local function ensureData()
   if data ~= nil then
     return
@@ -226,16 +142,6 @@ local function ensureData()
     if #decoded == 0 then
       error("dataset is empty", 0)
     end
-    -- l/k/a arrive pre-normalised and pre-indexed by the generator. The z
-    -- search blob (lowered name + keywords + aliases) is derived here
-    -- rather than shipped: it is a pure concatenation of the other
-    -- fields, and dropping it cuts the JSON the host must decode by a
-    -- third. Keep this loop allocation-light: it runs inside the
-    -- script-load chunk's CPU budget (see the ensureData() call at the
-    -- bottom of this section), and it publishes all three structures only
-    -- after it completes — a timeout/error can never expose a half-indexed
-    -- dataset to onChange (the former find(nil) follow-on failure that
-    -- made Noctalia disable the panel).
     local nextByCat = {}
     local nextEmojiIndex = {}
     for _, e in ipairs(decoded) do
@@ -250,7 +156,6 @@ local function ensureData()
       end
       e.z = z
       nextEmojiIndex[e.e] = e
-      -- Skin-tone variants stay searchable but never clutter the browse grid.
       if string.find(e.n, "skin tone", 1, true) == nil then
         local list = nextByCat[e.c]
         if list == nil then
@@ -272,13 +177,6 @@ local function ensureData()
   end
 end
 
--- Load once at script load. The chunk runs under the host's script-load
--- budget (100 ms), while every callback — onOpen included, where this load
--- used to run — gets 25 ms. Decoding the full dataset does not fit 25 ms on
--- slower or power-throttled machines: the budget interrupt fired inside the
--- decode, the pcall above swallowed it, and the panel opened empty forever
--- (#700). onOpen calls ensureData() again, so a chunk-time failure is
--- retried on every open rather than cached.
 ensureData()
 
 local function recents(now, n)
@@ -304,49 +202,6 @@ local function recents(now, n)
   return out
 end
 
--- ── Search (relevance dominates; frecency is a small tie-breaker) ──────
--- Per word, the BEST of the entry's match classes:
---   character: the query word IS the entry itself (typing/pasting "€")
---     1100 — beats every name match.
---   name: exact full name 1000 / word-boundary match 700 (w occurs in the
---     name starting at position 1 or right after a space — "hearts" and
---     "heart-eyes" both count as a "heart" word-boundary match, "sweetheart"
---     does not) / substring anywhere else, no boundary, e.g. "art" inside
---     "heart" 250.
---   keyword: exact 450 / prefix 150 / substring 80.
--- Symbol entries (s == 1 — € ± → π, the "chars" category) score their
--- curated aliases (a) like names — they ARE the names people type — and
--- sit slightly above the emoji name classes: alias/name exact 1000,
--- alias/name word-boundary 900, name substring 500. So a query that
--- clearly names a symbol ranks the symbol itself first ("euro" → €
--- before 💶, "arrow right" → → before ➡️) while emoji keep ranking
--- naturally for emoji-oriented queries ("star" still puts ⭐ first — no
--- symbol is named exactly "star").
--- All query words must match (AND); the entry's tier is its WEAKEST word.
--- A word-boundary name match always outranks a keyword-only match: the
--- short name is an entry's primary identity, keywords are secondary
--- aliases. Ranking "smiling face with hearts" (a name SUBSTRING match on
--- "heart") above "red heart" (a name word-boundary match) is exactly the
--- bug this replaced.
---
--- Entries tied on tier: a symbol beats an emoji (the query named a
--- character), then SPECIFICITY, not dataset order: fewer name words,
--- then a shorter name, wins — "red heart" (2 words, 9 chars) reads ahead
--- of "smiling face with hearts" (4 words) and every other equally
--- matching colour/decorated heart, because a short, focused name is more
--- centrally "about" the matched word than a longer compound one.
--- Frecency (capped) breaks any tie still remaining, then dataset order.
---
--- Plain substring scans throughout, no per-entry token arrays: this runs
--- over the full ~4000-entry dataset on every keystroke inside the host's
--- 25ms script-callback CPU budget, and allocating a tokens table per
--- entry (in ensureData, unconditionally, for entries most searches never
--- touch) blew that budget on open — confirmed live (onOpen errored
--- "exceeded its CPU budget" with a naive tokens-array version of this
--- search). nameWordCount below still allocates nothing; it is only ever
--- called for entries that already matched, a small fraction of the
--- dataset. Symbol alias scans add the same cost class as the keyword
--- loop over a similar-length array.
 local function isWordBoundaryMatch(n, w)
   local from = 1
   while true do
@@ -370,14 +225,9 @@ local function nameWordCount(n)
 end
 
 local function wordTier(entry, w)
-  -- Typing or pasting the literal character finds it directly.
   if entry.e == w then
     return 1100
   end
-  -- One find over the entry's pre-built search blob replaces ~20 finds
-  -- over name/keywords/aliases for every entry that cannot match at all
-  -- — the difference between fitting the host's per-keystroke CPU
-  -- budget and not on broad prefixes (confirmed live).
   if string.find(entry.z, w, 1, true) == nil then
     return 0
   end
@@ -385,9 +235,6 @@ local function wordTier(entry, w)
   local symbol = entry.s == 1
   local n = entry.l
   local best = 0
-  -- Symbol aliases first: name-class, so a symbol whose alias IS the
-  -- query ("euro", "arrow right", "plusminus") matches at full strength
-  -- instead of sinking into the weaker emoji-keyword class.
   if symbol and entry.a ~= nil then
     for _, x in ipairs(entry.a) do
       if x == w then
@@ -416,10 +263,6 @@ local function wordTier(entry, w)
       if k == w then
         t = 450
       elseif single then
-        -- Single-character words are the every-keystroke typing state:
-        -- keyword EXACT matches only (🅰 for "a"). The prefix/substring
-        -- find scans over every keyword were the dominant cost of broad
-        -- prefixes and only ever produced deep-tail tiers.
         t = 0
       elseif #k >= #w and string.sub(k, 1, #w) == w then
         t = 150
@@ -446,15 +289,6 @@ local function search(now)
     table.insert(words, w)
   end
   local scored = {}
-  -- Broad queries (a single "e") match thousands of entries, and sorting
-  -- them all once blew the host's per-callback CPU budget on the first
-  -- keystroke (confirmed live). Only the top MAX_SEARCH_RESULTS are ever
-  -- shown, so once the kept set is full, entries at or below its weakest
-  -- tier are skipped WITHOUT building a scored row (frecency, word count,
-  -- insert). Strictly-better tiers still enter, so the bounded set stays
-  -- a superset of the true top slice; only equal-tier ordering beyond the
-  -- cap can differ from an exact full sort — invisible results nobody
-  -- scrolls to.
   local minKeptTier = 1200
   for idx, e in ipairs(data) do
     local tierScore = 1000
@@ -486,8 +320,6 @@ local function search(now)
     if a.tier ~= b.tier then
       return a.tier > b.tier
     end
-    -- Equal relevance: the query named a character, so the symbol beats
-    -- an equally-scoring emoji ("copyright" → © before the ©️ emoji).
     if a.s ~= b.s then
       return a.s
     end
@@ -509,9 +341,7 @@ local function search(now)
   return out
 end
 
--- ── View model ─────────────────────────────────────────────────────────
 local function searchActive()
-  -- A query of only whitespace behaves as "no query" (browse view).
   return string.find(query, "%S") ~= nil
 end
 
@@ -556,10 +386,6 @@ local function buildView()
   renderLimit = math.min(#rows, INITIAL_RENDER_ROWS)
 end
 
--- Grows the render budget so the row a keyboard move lands on is always
--- built (arrows can otherwise select a not-yet-rendered — but real —
--- item; there is no scroll-into-view API for plugin panels, so this at
--- least guarantees the tile exists once the user scrolls to it).
 local function ensureRowRendered(rowIndex)
   if rowIndex > renderLimit then
     renderLimit = math.min(#rows, rowIndex)
@@ -582,29 +408,16 @@ local function moveSelection(dr, dc)
   ensureRowRendered(rowOfItem[sel] or 1)
 end
 
--- ── Actions ────────────────────────────────────────────────────────────
 local function shellQuote(s)
   return "'" .. string.gsub(s, "'", "'\\''") .. "'"
 end
 
--- Optional paste step after the clipboard copy. The shell cannot inject
--- keystrokes into an arbitrary window portably (every compositor handles
--- focus security differently, and virtual-keyboard injection needs tools
--- most setups don't run), so instead of shipping compositor-specific
--- machinery the panel runs whatever command the USER configured in the
--- `paste_command` setting: {emoji} is replaced with the shell-quoted
--- character. Empty (the default) means copy to the clipboard only.
--- Examples users can configure themselves:
---   ydotool key -d 20 29:1 47:1 47:0 29:0   (press Ctrl+V after the copy)
---   wtype {emoji}                            (type the character literally)
 local function pasteWithConfiguredCommand(emoji)
   local cmd = noctalia.getConfig("paste_command")
   if type(cmd) ~= "string" or cmd == "" then
     return
   end
   local quoted = shellQuote(emoji)
-  -- Function replacement: the quoted emoji must not be interpreted as a
-  -- gsub pattern replacement (e.g. a literal % or trailing digit).
   noctalia.runAsync((string.gsub(cmd, "{emoji}", function()
     return quoted
   end)))
@@ -623,21 +436,17 @@ local function commit(entry)
   u.c += 1
   u.t = now
   saveUsage()
-  -- (text, mime) — the binding requires both; plain UTF-8 text.
   noctalia.copyToClipboard(entry.e, "text/plain;charset=utf-8")
   pasteWithConfiguredCommand(entry.e)
   panel.close()
 end
 
--- ── Rendering ──────────────────────────────────────────────────────────
 local render -- forward declaration (closures below call it)
 
 local function tile(entry, idx)
   return ui.button({
     key = "t" .. tostring(idx),
     text = entry.e,
-    -- Keep each tier's designed glyph/tile ratio as the tile grows to
-    -- fill the row area (tier.glyph was sized for tier.cell).
     fontSize = math.floor(gridCell * tier.glyph / (tier.cell + TILE_CHROME)),
     width = gridCell - TILE_CHROME,
     height = gridCell - TILE_CHROME,
@@ -655,20 +464,12 @@ local function tile(entry, idx)
   })
 end
 
--- `entries` must be the same slice of `items` that buildView laid out,
--- starting at flat item index `startIndex` (keeps tiles' idx in sync with
--- the keyboard model). `budget` caps how many ROWS this call may add —
--- shared across every sectionBlock call in one gridArea() build, so the
--- cap applies to the whole view, not per-section (see renderLimit above).
 local function sectionBlock(label, entries, startIndex, budget)
   local children = {}
   if label ~= nil then
     table.insert(children, ui.label({
       key = "h" .. label,
       text = label,
-      -- Same box as the tile rows: with the scroll centering its children,
-      -- section labels stay flush with the grid block on panels wider
-      -- than the fitted row area (wide/desktop entries).
       width = gridRowWidth,
       textAlign = "left",
       fontSize = 11,
@@ -724,18 +525,11 @@ local function categoryStrip()
   for _, c in ipairs(CATEGORIES) do
     catButton(c.id, c.glyph, c.label)
   end
-  -- Centered by stretching: the root column is align="stretch", so the row
-  -- fills the same content box the search input spans and justify="center"
-  -- centers the buttons in the REAL width. No width estimate here — a
-  -- computed width (even the fitted contentWidth) anchors left of the input
-  -- by the estimate's error, which shows up as a few px of drift.
   return ui.row({ key = "cats", gap = 2, align = "center",
     justify = "center" }, buttons)
 end
 
 local function gridArea()
-  -- A load failure is never presented as "No results": the dataset is the
-  -- product, so say what broke (and the log carries the same reason).
   if data == nil then
     return ui.column({
       key = "load-error",
@@ -772,7 +566,6 @@ local function gridArea()
   local children = {}
   local budget = { remaining = renderLimit }
   if searchActive() then
-    -- Search view: one borderless grid of results.
     local section = {}
     for i = 1, #items do
       table.insert(section, items[i])
@@ -781,7 +574,6 @@ local function gridArea()
       table.insert(children, b)
     end
   else
-    -- Browse view: Frequently Used + category sections.
     local startIndex = 1
     local recent = recents(nowSec(), gridCols * 2)
     if #recent > 0 then
@@ -811,24 +603,11 @@ local function gridArea()
   end
 
   return ui.scroll({
-    -- The key tracks the VIEW identity (search vs. each browse tab):
-    -- switching tabs recreates the scroll container, so the new category
-    -- opens at its top instead of inheriting the old tab's scroll offset.
-    -- Within one view re-renders keep the key and preserve the position.
     key = "grid-" .. (if searchActive() then "search" else cat),
     flexGrow = 1,
     gap = GAP,
-    -- Children (row boxes of gridRowWidth) center in the scroll's inner
-    -- width: on the compact entry the box fills it, on wider entries the
-    -- grid block sits mid-panel instead of hugging the left edge.
     align = "center",
-    -- Half the reserved gutter on each side: the overlay scrollbar (which
-    -- reserves no width) then always paints over the gutter, never over a
-    -- tile, while left/right margins stay equal.
     paddingH = SCROLLBAR_GUTTER / 2,
-    -- Grow the render budget as the user scrolls near the bottom — the
-    -- first paint only builds INITIAL_RENDER_ROWS, so opening a large
-    -- category (500+ emoji) stays fast; scrolling fills in the rest.
     onScroll = function(offset, maxOffset)
       local off = tonumber(offset) or 0
       local mx = tonumber(maxOffset) or 0
@@ -870,18 +649,7 @@ local function footer()
 end
 
 render = function()
-  -- The host-owned panel surface already paints the card background,
-  -- rounded corners, outline and drop shadow (the shadow lands INSIDE
-  -- the surface). A root fill here would double-paint the background and
-  -- expose that inside shadow as a black band around the card, so the
-  -- root carries layout only.
-  -- Children accumulate with table.insert: the tab strip is conditional,
-  -- and a nil hole in an array constructor would truncate the child list
-  -- for any ipairs-style consumer.
   local children = {}
-  -- NB: no flexGrow on the input — it sits directly in a column, where
-  -- flexGrow would stretch it VERTICALLY into a giant field. Width comes
-  -- from the column's cross-axis stretch.
   table.insert(children, ui.input({
     key = "q-" .. tostring(inputKey),
     value = query,
@@ -896,8 +664,6 @@ render = function()
       render()
     end,
   }))
-  -- Category tabs belong to the browse view only: a query searches the
-  -- whole dataset, so the strip (and its space) disappears while typing.
   if not searchActive() then
     table.insert(children, categoryStrip())
   end
@@ -912,11 +678,6 @@ render = function()
   }, children))
 end
 
--- ── Lifecycle ──────────────────────────────────────────────────────────
--- The tier follows the entry width the shim passed (wide→9 columns,
--- desktop→8, compact→6). The old focused-output heuristic is gone: it
--- paired entry and output only when the binding matched the tier comment,
--- and misfit everywhere else.
 local function tierForWidth(width)
   for _, t in ipairs(TIERS) do
     if t.panel == width then
@@ -929,7 +690,6 @@ end
 function M.onOpen(entryWidth)
   ensureData()
   loadUsage()
-  -- The entry shim passes its manifest width: the entry is the size signal.
   fitWidth = if type(entryWidth) == "number" then entryWidth
     else PANEL_WIDTH_BY_ID.compact
   tier = tierForWidth(fitWidth)

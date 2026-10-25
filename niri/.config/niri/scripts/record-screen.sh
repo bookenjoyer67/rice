@@ -1,12 +1,4 @@
 #!/usr/bin/env bash
-# Toggle screen recording of the FOCUSED output with wf-recorder.
-#
-#   ~/.config/niri/scripts/record-screen.sh          # toggle: start / stop
-#   REC_AUDIO=0 ...                                  # no desktop audio
-#   REC_OUTPUT=DP-1 ...                              # record a specific output
-#   REC_CODEC=h264_nvenc ...                         # GPU encode (default libx264)
-#
-# Stop = SIGINT to wf-recorder, which is what finalises the mp4.
 set -uo pipefail
 
 OUTDIR="$HOME/Videos/Recordings"
@@ -34,7 +26,6 @@ stop_recording() {
     fi
 }
 
-# Already recording? -> stop.
 if [ -s "$PIDFILE" ]; then
     oldpid=$(cat "$PIDFILE")
     if kill -0 "$oldpid" 2>/dev/null; then
@@ -44,7 +35,6 @@ if [ -s "$PIDFILE" ]; then
     rm -f "$PIDFILE"
 fi
 
-# Which output? focused by default.
 output="${REC_OUTPUT:-}"
 if [ -z "$output" ]; then
     output=$(niri msg --json focused-output 2>/dev/null | jq -r '.name // empty')
@@ -60,7 +50,6 @@ if [ -n "$output" ]; then
     args+=(-o "$output")
 fi
 
-# Desktop audio (default sink monitor) unless REC_AUDIO=0.
 if [ "${REC_AUDIO:-1}" != "0" ]; then
     sink=$(pactl get-default-sink 2>/dev/null)
     if [ -n "$sink" ]; then

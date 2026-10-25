@@ -1,10 +1,4 @@
 --!nonstrict
--- arch-updater launcher provider, under the `/arch` prefix.
---
--- Empty query shows the three quick actions. Any other text is fuzzy-matched
--- against the pending packages from the last check, read straight from the
--- shared "arch_state" the engine publishes. Activating a package opens its
--- page, same as the panel's "open" button on a package row.
 
 local STATE_KEY = "arch_state"
 local REQUEST_KEY = "arch_request"

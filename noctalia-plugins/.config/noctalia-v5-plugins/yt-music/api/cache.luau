@@ -1,7 +1,5 @@
 --!strict
 
--- on-disk cache read/write: library, playlists, session, recent playlists.
-
 local logger = require("../utils/log.luau")
 local log = logger.module("ytapi", "cache")
 

@@ -1,16 +1,4 @@
 #!/usr/bin/env bash
-# Keep the current wallpaper painted on every connected, enabled output.
-#
-# Why this exists: niri 26.04 exposes no output events on its IPC event
-# stream, and awww only paints the outputs that exist at the moment
-# `awww img` runs -- it does not backfill an output that connects (or
-# re-connects) afterwards. The HDMI TV flaps at every boot
-# (connect -> disconnect -> reconnect, see `journalctl -b | grep HDMI-A-1`),
-# so it routinely ends up with no wallpaper while eDP-1 is fine.
-#
-# This watches for any enabled output that is not showing an image and
-# re-applies the current wallpaper to all outputs. Cheap: three short-lived
-# processes every INTERVAL seconds, and it does nothing when all is well.
 set -uo pipefail
 
 LINK="$HOME/.config/backgrounds/current-wallpaper"
@@ -19,7 +7,6 @@ INTERVAL=3
 
 log() { printf '[wallpaper-hotplug] %s\n' "$*"; }
 
-# Same wallpaper fetch-wallpaper.sh cached (there is only ever one file).
 current_image() {
     local img=""
     [ -L "$LINK" ] && img="$(readlink -f "$LINK" 2>/dev/null || true)"
@@ -33,7 +20,6 @@ heal_if_needed() {
     awww query &>/dev/null || return 0            # daemon not up yet
 
     local enabled shown o line
-    # Outputs niri considers connected AND enabled (logical is null when off).
     enabled="$(niri msg --json outputs 2>/dev/null \
         | jq -r 'to_entries[] | select(.value.logical != null) | .key')"
     [ -z "$enabled" ] && return 0

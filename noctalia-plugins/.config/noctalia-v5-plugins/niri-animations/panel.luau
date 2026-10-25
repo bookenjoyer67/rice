@@ -1,23 +1,4 @@
 --!nonstrict
--- Animation preset picker for niri.
---
--- Rewrites the target file (default ~/.config/niri/animations.kdl) with two things: an
--- `include` for the chosen preset and an `animations` block carrying the global speed.
--- Then it asks niri to reload its config.
---
--- Why rewriting it whole is safe: that file exists only for this. Your niri config.kdl is
--- expected to include it LAST, after the base animations — niri's includes are positional
--- and merge field by field, so whatever lands here wins.
---
--- `off` and `slowdown` are direct fields of `animations`, not subsections, which is why the
--- speed override applies on top of a preset that sets its own slowdown:
--- https://github.com/YaLTeR/niri/wiki/Configuration:-Animations
---
--- Presets are listed by FILENAME on purpose. Their headers carry a `Desc:` field, but it is
--- free-form text written by each preset author (often just "imported from https://…"), and
--- it gets worse with presets the user imported themselves. Surfacing it makes the plugin
--- look broken when the problem is somebody else's metadata. A filename always matches what
--- the user sees in the folder.
 
 local PLUGIN_ID = "imjustdoingmypart/niri-animations"
 
@@ -53,8 +34,6 @@ local function loadPresets()
   end
 end
 
--- Re-read state from the target file so the panel always opens reflecting reality, even if
--- the file was edited by hand or changed from somewhere else.
 local function loadCurrent()
   activeFile = nil
   slowdown = 1.0
@@ -111,7 +90,6 @@ local function apply()
   end
 end
 
--- Index 0 of the dropdown is "no preset"; real presets start at 1.
 local function options(): { string }
   local opts = { noctalia.tr("no_preset") }
   for _, p in ipairs(presets) do
@@ -130,8 +108,6 @@ end
 
 local function render()
   panel.render(ui.column({ flexGrow = 1, gap = 16, align = "stretch" }, {
-    -- No close button on purpose: on a keyboard-driven WM the panel is dismissed with Esc
-    -- or by pressing the shortcut again, so the button is dead weight.
     ui.label({ text = noctalia.tr("title"), fontSize = 16, fontWeight = "bold", color = "on_surface" }),
 
     ui.row({ gap = 12, align = "center" }, {

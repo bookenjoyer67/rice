@@ -6,12 +6,9 @@ return {
     config = function()
       require("nvim-treesitter").setup({})
 
-      -- Auto-install missing parsers on startup
       local ensure_installed = {
         "bash", "ruby", "html", "css", "scss",
         "javascript", "typescript", "json", "lua",
-        -- nvim's stock ftplugins for these call vim.treesitter.start()
-        -- unguarded, so a missing parser raises E5113 inside BufReadPost
         "markdown", "markdown_inline", "vimdoc", "query",
       }
       local installed = require("nvim-treesitter.config").get_installed()
@@ -25,7 +22,6 @@ return {
         require("nvim-treesitter").install(to_install)
       end
 
-      -- Enable treesitter highlighting for all filetypes
       vim.api.nvim_create_autocmd("FileType", {
         callback = function(args)
           pcall(vim.treesitter.start, args.buf, args.match)

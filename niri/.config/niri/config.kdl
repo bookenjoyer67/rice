@@ -1,11 +1,7 @@
-// niri 26.04 config — migrated from Hyprland (Lua) on 2026-08-09
-// Dotfiles-backed: ~/.config/niri -> dotfiles/niri/.config/niri
-// Reference: /usr/share/doc/niri/default-config.kdl
 
 input {
     keyboard {
         xkb {
-            // Fetch layout from org.freedesktop.locale1 (set via localectl).
         }
         numlock
     }
@@ -18,23 +14,9 @@ input {
         natural-scroll
     }
 
-    // GNOME-style: focus window the mouse hovers over (only when fully on screen).
     focus-follows-mouse max-scroll-amount="0%"
 }
 
-// Multi-monitor: laptop panel (built-in, primary) + Funai/Magnavox TV over HDMI.
-// Layout (logical coords @ scale 1):  [ eDP-1 1920x1080 ] [ HDMI-A-1 1360x768 ]
-//   eDP-1  -> 0,0        HDMI-A-1 -> 1920,0   (TV sits physically to the right)
-//
-// The TV runs 1360x768, NOT 1920x1080, on purpose. It is a 1366x768-panel
-// Magnavox (Funai) set that hard-overscans every 1080p input -- cropping all
-// four edges of the desktop -- and has no on-screen setting to disable it.
-// Feeding it its near-native 1360x768 makes it map 1:1 with no cropping
-// (verified by eye: full desktop visible). Do NOT "fix" this back to 1080p.
-//
-// Refresh rates must match `niri msg outputs` exactly or niri silently falls
-// back to the output's *preferred* mode -- for this TV that is the overscanned
-// 1080p, i.e. the bug comes back. Hence the refresh is pinned below.
 output "eDP-1" {
     mode "1920x1080@144.023"
     scale 1.0
@@ -48,45 +30,24 @@ output "HDMI-A-1" {
     position x=1920 y=0
 }
 
-// Tearing fix: the TV (HDMI-A-1) is wired to the NVIDIA dGPU while niri renders
-// on the Intel iGPU, so every TV frame is a cross-GPU composite. Without this,
-// niri queues the next frame before the previous page-flip has completed, which
-// shows up as tearing in some fullscreen games on the TV (niri issue #2205).
-// Wait for frame completion before queueing the next one.
 debug {
     wait-for-frame-completion-before-queueing
 }
 
-// awww's layer-shell surface namespace is "awww-daemon" (not "wallpaper"),
-// so match that to place the wallpaper inside the overview backdrop.
 layer-rule {
     match namespace="^awww-daemon$"
     place-within-backdrop true
 }
 
-// Noctalia v5 backdrop: blurred+tinted copy of the current wallpaper for the
-// overview. [backdrop].enabled in ~/.config/noctalia/backdrop.toml.
 layer-rule {
     match namespace="^noctalia-backdrop$"
     place-within-backdrop true
 }
 
-// Noctalia desktop widgets: while the overview is open the layer-swap shim moves
-// each noctalia-desktop-widget-* surface to the Background
-// layer, and this rule drops it into the stationary backdrop -- so the widgets stay
-// PINNED (no workspace zoom) and draw BELOW the open windows. Inert while they sit
-// on their native layer (overview closed); only Background-layer surfaces match.
 layer-rule {
     match namespace="^noctalia-desktop-widget-"
     place-within-backdrop true
 }
-
-// Noctalia's desktop widgets are NOT re-layered HERE (this file's rule above only
-// catches surfaces ALREADY on the Background layer): niri has no rule that can CHANGE
-// a client's surface layer, and Noctalia hard-codes desktop widgets to the Bottom
-// layer. The bottom->background swap that keeps them pinned below the windows during
-// the overview is done inside Noctalia by ~/.local/lib/noctalia-layer-swap.so
-// (LD_PRELOAD, see the spawn-at-startup line below and ~/.local/src/noctalia-layer-swap/).
 
 layout {
     gaps 6
@@ -117,7 +78,6 @@ layout {
 
     shadow {
             on
-            // Draw the shadow behind the window so transparent interiors read clearly.
             draw-behind-window true
             softness 30
             spread 5
@@ -133,19 +93,12 @@ overview {
     zoom 0.45
 }
 
-// Background blur — frosts whatever sits behind transparent windows and
-// translucent layer surfaces (panels, clocks). Tuned: 3 passes, slight
-// offset, mild noise, saturation boost for a clean frosted look.
 blur {
     passes 2
     noise 0.0001
     saturation 3
 }
 
-// Bouncy summon/dismiss. niri animations are GLOBAL, so this spring applies to
-// every window's open/close -- the launcher and panels animate by the same rule.
-// damping-ratio < 1 = overshoot/bounce;
-// lower it for more wibble, raise toward 1.0 for a clean settle.
 animations {
     window-open {
         spring damping-ratio=0.6 stiffness=650 epsilon=0.0001
@@ -173,70 +126,18 @@ cursor {
 screenshot-path "~/Pictures/Screenshots/Screenshot from %Y-%m-%d %H-%M-%S.png"
 
 hotkey-overlay {
-    // Do NOT show the "Important Hotkeys" popup on first start.
-    // SUPER+SHIFT+/ still opens it on demand.
     skip-at-startup
 }
 
-// Built-in idle timeout is not available in niri 26.04 (no `idle` config node).
-// Automatic monitor power-off on idle would need `swayidle` (not installed).
-// Manual power-off: SUPER+SHIFT+P.
-
-// ---------------------------------------------------------------------------
-// Autostart (mirrors Hyprland's hl.on("hyprland.start") block)
-// ---------------------------------------------------------------------------
 spawn-at-startup "nm-applet"
-// Shell: Noctalia v5 (native C++). It supplies the bar (on every output), the
-// notification daemon (owns org.freedesktop.Notifications) and the SNI tray in a
-// single process. Keybinds: Mod+SPACE -> launcher, Mod+N -> notifications.
-// Launched under noctalia-layer-swap.so: Noctalia hard-codes desktop widgets to the
-// Bottom layer, which niri zooms with the workspaces in the overview. The shim moves
-// those surfaces to the Background layer while the overview is open, and the
-// place-within-backdrop layer-rule above drops them into the stationary backdrop --
-// so they stay PINNED and draw BELOW the open windows (neither sliding away nor over
-// the windows). It backs off for every other process (arms only in `noctalia`).
-// Shim source + rationale: ~/.local/src/noctalia-layer-swap/
 spawn-at-startup "sh" "-c" "LD_PRELOAD=\"$HOME/.local/lib/noctalia-layer-swap.so\" exec noctalia"
-// One Noctalia process covers the bar on every output, the notification daemon
-// and the SNI tray, so there is nothing else to spawn for the shell.
-// XWayland for X11 apps (Steam etc.). niri 25.08+ integrates with
-// xwayland-satellite itself: it creates the X11 sockets and spawns the binary
-// on demand, so there must be NO manual spawn-at-startup line for it -- a
-// second instance breaks the built-in integration.
-// `path` points niri at the locally-built v0.8.3 binary. v0.8.2 has a bug where
-// Steam's override-redirect popups (context menus, dropdowns) were focused and
-// then instantly unmapped; v0.8.3 (commit add2795) fixes it.
-// PORTABILITY: left unset on purpose -> niri looks for `xwayland-satellite` in
-// $PATH. Uncomment and point at a local build only if you need a specific version.
-// xwayland-satellite {
-//     path "$HOME/.local/bin/xwayland-satellite"
-// }
 spawn-at-startup "bash" "-c" "$HOME/.config/niri/scripts/start-wallpaper-one.sh"   // awww daemon + re-paint the CURRENT wallpaper at startup (no new image; rotation DISABLED, user switches manually)
 spawn-at-startup "bash" "-c" "$HOME/.config/niri/scripts/wallpaper-hotplug.sh"     // re-paint wallpaper on monitors that (re)connect after startup (e.g. the flapping HDMI TV)
-// cava spectrum bars, drawn on the GPU: one fullscreen fragment shader per output
-// (wlr-layer-shell, Bottom layer) instead of the Noctalia desktop widget, which
-// cost cairo ~1 core. Source: ~/.local/src/wallpaper-bars-gpu/  Toggle: Mod+B
 spawn-at-startup "bash" "-c" "exec $HOME/.local/bin/wallpaper-bars-gpu >>$HOME/.cache/wallpaper-bars-gpu.log 2>&1"
 spawn-at-startup "wl-paste" "--type" "text" "--watch" "cliphist" "store"
 spawn-at-startup "wl-paste" "--type" "image" "--watch" "cliphist" "store"
-// Night light / blue-light filter. niri implements wlr-gamma-control (since
-// v0.1.4), which is what wlsunset needs -- no X11 randr involved. Curve matches
-// the actual sun position for St. Louis: 6500K during the day, 4000K at night,
-// smooth ramp through dawn/dusk. wlsunset is preferred over gammastep here
-// because niri's gamma set is slow and wlsunset only writes the LUT when the
-// temperature actually changes instead of polling. Send SIGUSR1 to cycle
-// forced-day -> forced-night -> auto; good thing to bind to a hotkey.
-// Binary is a local extract of the Arch `wlsunset` package in ~/.local/bin
-// (pacman would have needed root at setup time).
 spawn-at-startup "wlsunset" "-l" "38.6" "-L" "-90.2" "-T" "6500" "-t" "4000"
 
-// ---------------------------------------------------------------------------
-// Window rules (float dialogs & utilities, like Hyprland's float-* rules)
-// ---------------------------------------------------------------------------
-// Global rounding: niri draws the focus ring along the window's geometry, so this
-// is what gives the selection ring rounded corners. clip-to-geometry keeps the
-// app content inside the rounded shape. Kept first so app-specific rules (the
-// launcher's 14, dialogs) still override it.
 window-rule {
     geometry-corner-radius 8
     clip-to-geometry true
@@ -269,12 +170,9 @@ window-rule {
     match app-id="^xdg-desktop-portal-gtk$"
     open-floating true
 }
-// kitty is transparent — draw the focus ring AROUND its edges instead of as a
-// solid background fill behind it (which shows through the transparency).
 window-rule {
     match app-id="^kitty$"
     draw-border-with-background false
-    // transparent interior was showing the draw-behind-window shadow, so keep it edge-only + subtle
     shadow {
         on
         softness 4
@@ -284,9 +182,6 @@ window-rule {
         draw-behind-window true
     }
 }
-// Brave is (semi)transparent — same issue: the active/inactive focus-ring gets
-// drawn as a solid fill BEHIND the window, reading as a thick border.
-// Force the ring to outline the edges instead.
 window-rule {
     match app-id="^brave-browser$"
     draw-border-with-background false
@@ -313,18 +208,6 @@ window-rule {
       draw-behind-window true
     }
 }
-// Steam: CEF paints an OPAQUE surface, so unlike kitty/Nautilus the glass has to
-// come from niri's own opacity (there is no app-side alpha to paint into). Keep
-// the fade shallow -- at 0.90 the library text and artwork still read clearly,
-// while the wallpaper shows through enough to blur into a frosted backdrop.
-// draw-border-with-background false is mandatory here: with a translucent window
-// niri would otherwise paint the focus-ring colour as a SOLID slab behind it,
-// which shows through and tints the whole client.
-// The shadow override exists for the same reason -- the global shadow's opaque
-// #421f would read as a red panel inside the glass, so it uses kitty's
-// transparent colour instead.
-// NOTE: Steam also opens its friends list, chat windows and context menus with
-// app-id "steam", so those inherit the same rounding/glass. That is intentional.
 window-rule {
     match app-id="^steam$"
     geometry-corner-radius 12
@@ -343,9 +226,6 @@ window-rule {
         blur true
     }
 }
-// Unfocused Steam: a touch more glass, matching kitty's house pattern (and
-// cancelling the global is-active=false 0.75 dim, which would be too washed out
-// at this UI's text density). One match line so app-id and is-active AND.
 window-rule {
     match app-id="^steam$" is-active=false
     opacity 0.90
@@ -354,25 +234,11 @@ window-rule {
         blur true
     }
 }
-// Nautilus: transparency lives in the APP's CSS, not here. niri's window
-// `opacity` fades the ENTIRE surface (text, icons, sidebar included), which is
-// not what we want — so this rule stays at full opacity and only supplies the
-// frosted blur. The see-through background is painted by
-// ~/.config/gtk-4.0/gtk.css (rendered from the Noctalia gtk4 template): window
-// base + file-view backdrop are transparent, headerbar/sidebar/text/icons are
-// their own opaque paint. draw-border-with-background false keeps the focus
-// ring an outline instead of a solid fill behind the glass.
 window-rule {
     match app-id="^org.gnome.Nautilus$"
-    // cancel the global `is-active=false opacity 0.95` dim so unfocused looks
-    // exactly like focused
     opacity 1.0
     geometry-corner-radius 12
     draw-border-with-background false
-    // Shadow back ON at global strength, drawing behind the window like kitty
-    // does, but with kitty's TRANSLUCENT colour (#421f4466) instead of the
-    // global opaque #421f — so it reads as a soft shadow through the glass
-    // rather than a solid red panel.
     shadow {
         on
         softness 38
@@ -385,28 +251,18 @@ window-rule {
         blur true
     }
 }
-// Inactive kitty: slightly more transparent + frosted than the global inactive rule.
-// Must come AFTER the rule above (later rules override earlier); app-id + is-active
-// share one match line so they AND, not OR.
 
-
-// ---------------------------------------------------------------------------
-// Keybindings
-// ---------------------------------------------------------------------------
 binds {
-    // --- Apps ---
     Mod+Return { spawn "kitty"; }                          // terminal (SUPER+Enter)
     Mod+SPACE { spawn-sh "noctalia msg panel-toggle launcher"; }   // app launcher (Noctalia)
     Mod+E { spawn "nautilus"; }                            // file manager
     Mod+Shift+S { spawn-sh "bash ~/.config/niri/scripts/search-selection.sh"; }  // search highlighted text
 
-    // --- Windows ---
     Mod+Q { close-window; }
     Mod+F { fullscreen-window; }
     Mod+Shift+F { toggle-window-floating; }                // tiling <-> floating
     Mod+M { maximize-window-to-edges; }
 
-    // --- Focus navigation (columns) ---
     Mod+A { focus-column-left; }
     Mod+D { focus-column-right; }
     Mod+S { focus-window-or-workspace-down; }   // down through windows, spills to next workspace
@@ -414,29 +270,17 @@ binds {
     Mod+WheelScrollUp { focus-window-or-workspace-up; }
     Mod+WheelScrollDown { focus-window-or-workspace-down; }
 
-    // --- Focus the other monitor (laptop <-> TV), without moving anything ---
-    // Mod+H/L changes column focus within a workspace; this jumps focus
-    // between screens. niri's own default is Mod+Shift+H/L, but your
-    // Mod+Shift+L is already the lock screen, so this uses Mod+Alt instead.
     Mod+Alt+A { focus-monitor-left; }
     Mod+Alt+D { focus-monitor-right; }
 
-    // --- Move window / column (niri default SUPER+CTRL) ---
     Mod+Ctrl+A { move-column-left; }
     Mod+Ctrl+D { move-column-right; }
     Mod+Ctrl+S { move-window-down-or-to-workspace-down; }   // move window down, to next workspace at edge
     Mod+Ctrl+W { move-window-up-or-to-workspace-up; }       // move window up, to prev workspace at edge
 
-    // --- Send column to the other monitor (laptop <-> TV) ---
-    // Escalation of the Mod+Ctrl+H/L moves just above: same direction, but
-    // across screens. (niri ships these on Mod+Shift+Ctrl+H/L; this mirrors
-    // your existing Mod+Ctrl+... scheme instead.)
-    // Want to move only the focused window out of a multi-window column?
-    // Swap "move-column" for "move-window" below.
     Mod+Ctrl+Shift+A { move-column-to-monitor-left; }
     Mod+Ctrl+Shift+D { move-column-to-monitor-right; }
 
-    // --- Column width ---
     Mod+R { switch-preset-column-width; }
     Mod+Shift+R { switch-preset-column-width-back; }
     Mod+Minus { set-column-width "-1%"; }
@@ -444,7 +288,6 @@ binds {
     Mod+Shift+Equal { set-column-width "+5%"; }
     Mod+Equal { set-column-width "+1%"; }
 
-    // --- Workspaces ---
     Mod+Shift+J { move-window-to-workspace-down; }   // move window a workspace down
     Mod+Shift+K { move-window-to-workspace-up; }     // move window a workspace up
     Mod+1 { focus-workspace 1; }
@@ -467,7 +310,6 @@ binds {
     Mod+Shift+9 { move-window-to-workspace 9; }
     Mod+Tab { toggle-overview; }                           // GNOME-ish overview (was hyprexpose)
 
-    // --- System ---
     Mod+Shift+L { spawn-sh "exec $HOME/.local/bin/lock.sh"; }  // lock screen (swaylock ring, SUPER+SHIFT+L)
     Mod+Shift+E { spawn-sh "noctalia msg panel-toggle session"; }   // logout/power menu
     Mod+N { spawn-sh "noctalia msg panel-toggle control-center notifications"; }   // notifications (Noctalia)
@@ -477,32 +319,20 @@ binds {
     Mod+Ctrl+Shift+X { spawn-sh "bash ~/.config/niri/scripts/swipe-delete-wallpaper.sh"; }  // BAN current wallpaper (Tinder "reject") — 4 keys on purpose: Mod+X was too easy to hit by accident
     Mod+Y { spawn-sh "noctalia msg panel-toggle aabidk20/yt-music:panel"; }  // YouTube Music panel (Noctalia plugin)
 
-    // --- Shell / resources ---
-    // Starts/stops the GPU cava bars (wlr-layer-shell renderer, ~1-2% CPU) that
-    // replaced the Noctalia wallpaper-bars widget (~1 core of cairo raster).
-    // Source: ~/.local/src/wallpaper-bars-gpu/  Widget plugin stays disabled.
-    Mod+B { spawn-sh "bash ~/.config/niri/scripts/toggle-wallpaper-bars.sh"; }   // cava bars off/on
+    Mod+B { spawn-sh "bash ~/.config/niri/scripts/toggle-wallpaper-bars.sh"; }
 
-    // --- Screenshot ---
-    // niri's own screenshot UI: drag a region, or click a window/full screen,
-    // then Enter to save to screenshot-path (~/Pictures/Screenshots).
     Print { screenshot; }                                  // screenshot UI (region / pick)
     Mod+P { screenshot; }                                  // same, for laptops with no Print key
     Mod+Print { screenshot-screen; }                       // full screen, no UI
     Shift+Print { screenshot-window; }                     // focused window, no UI
 
-    // --- Screen recording (toggle) ---
     Mod+Shift+Ctrl+R { spawn-sh "bash ~/.config/niri/scripts/record-screen.sh"; }  // start/stop recording focused output + desktop audio -> ~/Videos/Recordings
 
-    // --- Quit / power ---
     Ctrl+Alt+Delete { quit; }                              // quit (confirmation dialog)
     Mod+Shift+P { power-off-monitors; }
 
-    // --- Hotkey overlay ---
     Mod+Shift+Slash { show-hotkey-overlay; }
 
-    // --- Media keys ---
-    // Level only -- these do not spawn an OSD overlay.
     XF86AudioRaiseVolume allow-when-locked=true { spawn-sh "wpctl set-volume -l 1 @DEFAULT_AUDIO_SINK@ 5%+"; }
     XF86AudioLowerVolume allow-when-locked=true { spawn-sh "wpctl set-volume @DEFAULT_AUDIO_SINK@ 5%-"; }
     XF86AudioMute allow-when-locked=true { spawn-sh "wpctl set-mute @DEFAULT_AUDIO_SINK@ toggle"; }
@@ -511,16 +341,8 @@ binds {
     XF86MonBrightnessDown allow-when-locked=true { spawn-sh "brightnessctl set 5%-"; }
 }
 
-// Wallpaper-driven focus-ring ("selection ring") gradient. Rendered by the
-// Noctalia user template [theme.templates.user.niri-focus-ring] on every palette
-// change; this include must stay BEFORE animations.kdl (that one is meant to be
-// last, since it overrides the base animations block).
 include optional=true "./focus-ring.kdl"
 
-// niri-animations (Noctalia plugin) — its target file is included LAST so a picked
-// preset/speed overrides the base animations block above. optional=true so a missing
-// file only warns. Presets live in ~/.config/niri/animations/.
 include optional=true "./animations.kdl"
-
 
 include "noctalia.kdl"

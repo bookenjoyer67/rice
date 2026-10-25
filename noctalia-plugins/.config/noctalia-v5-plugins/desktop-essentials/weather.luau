@@ -1,9 +1,4 @@
 --!nonstrict
--- Desktop weather: one line, e.g. "  +61 F", exactly what the eww weather
--- widget showed. The text comes from the existing wttr.in script (which caches
--- for 30 min); we re-run it every 15 min anyway so the cache never goes stale
--- silently. Click opens the Noctalia control-center weather tab (same action
--- the eww weather button used).
 
 local HOME = noctalia.getenv("HOME") or ""
 local SCRIPT = HOME .. "/.local/bin/weather.sh"

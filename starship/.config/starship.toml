@@ -1,11 +1,5 @@
 "$schema" = 'https://starship.rs/config-schema.json'
 
-# Divine Machinery — starship prompt
-# Circular pill segments: every module draws its own  caps + bg, so the
-# chain can NEVER break no matter which modules are present.
-# Void + hot pink hero, gold, crimson, circuit green, ethereal cyan,
-# byzantine purple, amber.
-
 format = "[💻](fg:hotpink) $username $directory $git_branch $git_status $cmd_duration $status $nodejs $rust $python $c $golang $php $java $kotlin $docker_context $time$line_break$character"
 
 palette = 'divine-machinery'
@@ -27,23 +21,19 @@ black     = "#0A0A0F"  # alias -> void
 [os]
 disabled = true
 
-# HERO — white on hot pink
 [username]
 show_always = true
 format = '[](fg:hotpink)[ 👤 $user ](fg:white bg:hotpink)[](fg:hotpink)'
 
-# PATH — parchment on void
 [directory]
 truncation_length = 5
 truncation_symbol = "../"
 format = '[](fg:black)[ 📁 $path ](fg:parchment bg:black)[](fg:black)'
 
-# BRANCH — black on gold (Byzantine trace)
 [git_branch]
 symbol = ""
 format = '[](fg:gold)[ $symbol $branch ](fg:black bg:gold)[](fg:gold)'
 
-# DIRTY STATE — white on crimson
 [git_status]
 format = '[](fg:crimson)[ $all_status$ahead_behind ](fg:white bg:crimson)[](fg:crimson)'
 
@@ -58,7 +48,6 @@ format = '[](fg:red)[ $symbol $status ](fg:white bg:red)[](fg:red)'
 pipestatus = true
 pipestatus_format = '[](fg:red)[ $symbol $pipestatus ](fg:white bg:red)[](fg:red)'
 
-# LANGS — circuit green / amber / ethereal cyan / byzantine purple
 [nodejs]
 symbol = ""
 format = '[](fg:green)[ $symbol $version ](fg:black bg:green)[](fg:green)'
@@ -95,7 +84,6 @@ format = '[](fg:purple)[ $symbol $version ](fg:black bg:purple)[](fg:purpl
 symbol = ""
 format = '[](fg:black)[ $symbol $context ](fg:cyan bg:black)[](fg:black)'
 
-# CLOCK — black on gold halo
 [time]
 disabled = false
 time_format = "%H:%M"

@@ -1,4 +1,3 @@
--- Pure string/number helpers shared across modules and api layers.
 
 local Utils = {}
 

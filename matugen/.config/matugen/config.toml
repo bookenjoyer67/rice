@@ -1,46 +1,24 @@
 [config]
 
-
-
 [templates.kitty]
 input_path = 'templates/kitty-theme.conf'
 output_path = '~/.config/kitty/matugen-theme.conf'
 post_hook = 'kitty @ set-colors -a -c ~/.config/kitty/matugen-theme.conf 2>/dev/null || true'
 
-# kitty background only: wallpaper-derived surface color, included by kitty.conf.
-# Reload kitty (no controlling tty needed, unlike `kitty @`) so the include re-reads.
 [templates.kitty_bg]
 input_path = 'templates/kitty-bg.conf'
 output_path = '~/.config/kitty/matugen-bg.conf'
 post_hook = 'pkill -SIGUSR1 kitty 2>/dev/null || true'
 
-# EWW widgets: palette comes from Noctalia, not matugen — the shell's resolved
-# palette is rendered into ~/.config/eww/noctalia-colors.scss by the user
-# template in ~/.config/noctalia/templates.toml (post_hook: theme-reload.sh).
-# matugen's separate palette drifted from the shell colours, so it is disabled.
-# [templates.eww]
-# input_path = 'templates/eww-colors.scss'
-# output_path = '~/.config/eww/matugen-colors.scss'
-# post_hook = 'bash ~/.config/eww/scripts/theme-reload.sh'
-
-# Lock-screen palette: flat c_* anchors read by lock.sh and make_backdrop.py.
-# Lives under ~/.local/state, not ~/.config/yambar — nothing in this rice draws
-# a yambar bar.
 [templates.palette]
 input_path = 'templates/palette.yml'
 output_path = '~/.local/state/rice/palette.yml'
 
-# Neovim: the base16 palette for the current wallpaper, consumed by
-# ~/.config/nvim/lua/matugen.lua. The post_hook pings every running nvim so it
-# reloads the palette live (its SIGUSR1 handler) instead of needing a restart.
 [templates.nvim]
 input_path = 'templates/nvim-palette.lua'
 output_path = '~/.config/nvim/lua/palette.lua'
 post_hook = 'pkill -SIGUSR1 nvim 2>/dev/null || true'
 
-# Starship prompt: the whole config is generated (starship has no include
-# mechanism, so the palette cannot be a separate file). Starship re-reads its
-# config on every prompt, so no post_hook is needed.
 [templates.starship]
 input_path = 'templates/starship.toml'
 output_path = '~/.config/starship.toml'

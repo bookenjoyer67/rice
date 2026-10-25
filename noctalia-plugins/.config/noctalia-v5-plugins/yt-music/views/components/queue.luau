@@ -181,7 +181,6 @@ local function build_queue()
 				ui.column({ key = "queue-track-list", gap = 0, borderWidth = 0, radius = theme.radius }, rows)
 			)
 		else
-			-- catch-all: a drop anywhere on the list goes to the bottom of the page
 			table.insert(
 				child,
 				ui.dropZone({

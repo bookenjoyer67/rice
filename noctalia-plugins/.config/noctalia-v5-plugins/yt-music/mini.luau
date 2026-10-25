@@ -118,7 +118,6 @@ local function render_mini()
 	local track_title = (player.title ~= nil and player.title ~= "") and player.title or "No Track Playing"
 	local track_artist = (player.artist ~= nil and player.artist ~= "") and player.artist or "YouTube Music"
 
-	-- Album Art Thumbnail
 	local player_thumb
 	if player.thumb_path and noctalia.fileExists(player.thumb_path) then
 		player_thumb = ui.image({
@@ -142,7 +141,6 @@ local function render_mini()
 		})
 	end
 
-	-- Header Cover Card
 	local cover_card = ui.column({
 		key = "mini-cover-card",
 		align = "center",
@@ -209,7 +207,6 @@ local function render_mini()
 		}),
 	})
 
-	-- Progress Scrub Bar
 	local scrub_row = ui.column({ key = "mini-scrub-col", gap = 4, width = "fill", radius = theme.radius }, {
 		ui.row({
 			key = "mini-scrub-labels",
@@ -240,7 +237,6 @@ local function render_mini()
 			controlSize = "sm",
 			onChange = function(v)
 				local num = tonumber(v)
-				-- Ignore programmatic onChange events
 				if num and num ~= math.floor(position) then
 					seek_drag_state = { dragging = true, position = num, timestamp = os.time(), track_id = player.id }
 				end
@@ -253,7 +249,6 @@ local function render_mini()
 		}),
 	})
 
-	-- Transport Controls
 	local shuffle_active = (player.shuffle == true)
 	local rep_mode = player.repeat_mode or "off"
 	local rep_active = (rep_mode ~= "off")
@@ -298,7 +293,6 @@ local function render_mini()
 		}
 	)
 
-	-- Footer Links & Volume
 	local footer_children = {}
 	if state.online == false then
 		table.insert(

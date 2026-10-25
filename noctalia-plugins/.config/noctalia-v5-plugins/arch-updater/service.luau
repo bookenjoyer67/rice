@@ -1,34 +1,4 @@
 --!nonstrict
--- arch-updater singleton engine. Checks pacman, the AUR helper and Flatpak,
--- publishes the result as shared state, and runs the update in the
--- BACKGROUND: one click, pkexec (polkit) asks for the password, the run is
--- fully non-interactive (--noconfirm and friends) and its log streams into
--- the panel.
---
---   state    "arch_state"   = { nonce, phase, step, total, pacman, aur,
---                                flatpak, downloadSizeMiB, rebootRecommended,
---                                newsUnread, newsLatestTitle, err, checkedAt,
---                                ignoredCount, ignoredPending, ignoredDynamic,
---                                ignoredConfig, history, activity, lastUpdateAt,
---                                logTail, logPath, runExit,
---                                progress = { done, total } }
---   requests "arch_request" = { nonce, action, pkg }
---                              -- check|update|update_background|update_terminal
---                              -- |dismiss|open_news
---                              -- |ignore|unignore (pkg = package name)
---
--- "update" follows the update_mode setting: "terminal" (default, like the
--- original plugin) opens a terminal window where prompts and the PKGBUILD
--- review work as usual; "background" runs non-interactively as described
--- above. Both write to the same log, so the panel's live tail, the progress
--- bar and the history strip work in either mode.
---
--- The update run is spawned fully detached (double-fork + setsid), writing to
--- <plugin data dir>/update.log; it survives a shell restart. The engine polls
--- the log every RUN_POLL_SECONDS with `tail` and finishes when the runner's
--- "::EXIT <code>" marker appears. If a background run cannot proceed
--- non-interactively it exits non-zero without touching the system, and the
--- panel offers a terminal retry where prompts work normally.
 
 local STATE_KEY = "arch_state"
 local REQUEST_KEY = "arch_request"
@@ -131,17 +101,10 @@ local function logPath()
     return dir .. "/" .. LOG_FILE
 end
 
--- Package names reach the command line (--ignore, pacman -Si), so only
--- pacman's own name grammar is accepted. Anything else is dropped with a log
--- line instead of being quoted.
 local function validName(name)
     return name:match("^[a-zA-Z0-9._+-]+$") ~= nil
 end
 
--- Two plugin-side ignore sources: the "ignore_packages" setting and a
--- panel-managed list in IGNORE_FILE (the panel cannot write settings).
--- pacman.conf's IgnorePkg arrives from the checkers as "[ignored]" lines
--- and is displayed only, never managed here.
 local function ignorePath()
     local dir, err = noctalia.pluginDataDir()
     if dir == nil then
@@ -226,8 +189,6 @@ local function ignoreSet()
     return set
 end
 
--- Appends to the panel-managed list without touching the current snapshot;
--- used in bulk after a rollback when rollback_auto_ignore is on.
 local function addIgnoreName(name)
     name = trim(tostring(name or ""))
     if not validName(name) then
@@ -243,11 +204,6 @@ local function addIgnoreName(name)
     saveDynamicIgnore()
 end
 
--- ── Run history ──────────────────────────────────────────────────────────────
-
--- One entry per finished background run: when it ran, whether it was a
--- rollback, and the "name from -> to" list it applied. This is what the
--- panel's history strip shows and what rollback resolves versions from.
 local function runsPath()
     local dir = noctalia.pluginDataDir()
     return dir ~= nil and (dir .. "/" .. RUNS_FILE) or nil
@@ -325,10 +281,6 @@ local function findRun(at)
     return nil
 end
 
--- Snapshot of everything the update run is about to apply, taken at launch:
--- the run itself is non-interactive, so its target set is exactly the
--- pending list. Flatpak entries are kept for display but can't be rolled
--- back through the pacman cache.
 local function collectPendingPackages()
     local packages = {}
     for _, source in ipairs({ { key = "pacman", entry = sources.pacman }, { key = "aur", entry = sources.aur }, { key = "flatpak", entry = sources.flatpak } }) do
@@ -341,12 +293,6 @@ local function collectPendingPackages()
     return packages
 end
 
--- ── Activity history (the upstream graph, opt-in) ───────────────────────────
-
--- One { n, at, afterUpdate } entry per finished check: how many updates were
--- pending at that moment. The panel draws these as a small trend graph.
--- Distinct from the run history above: this tracks *checks* (including the
--- stretches when nothing was updated), not applied runs.
 local function activityStatePath()
     local dir = noctalia.pluginDataDir()
     return dir ~= nil and (dir .. "/" .. ACTIVITY_FILE) or nil
@@ -364,8 +310,6 @@ local function loadActivityState()
     end)
     if ok and type(decoded) == "table" then
         if type(decoded.history) == "table" then
-            -- Migrates upstream's old format (a plain array of counts) to
-            -- entries with a timestamp and an afterUpdate flag.
             local migrated = {}
             for _, entry in ipairs(decoded.history) do
                 if type(entry) == "table" then
@@ -397,9 +341,6 @@ local function saveActivityState()
     end
 end
 
--- Appends the current total to the activity history, trimmed to the
--- configured length. A no-op when the graph is turned off, so disabling it
--- also stops collecting data, not just hides it.
 local function recordCheck()
     local wasPostUpdate = checkIsPostUpdate
     checkIsPostUpdate = false
@@ -415,8 +356,6 @@ local function recordCheck()
     saveActivityState()
 end
 
--- Marks the check that follows as the one that verifies an update run, so its
--- history entry can say "Updated" instead of just a pending count.
 local function recordUpdateRun()
     checkIsPostUpdate = true
     if cfg("show_activity_graph") ~= true then
@@ -427,12 +366,6 @@ local function recordUpdateRun()
     saveActivityState()
 end
 
--- ── Parsing ──────────────────────────────────────────────────────────────────
-
--- One "name oldver -> newver" line per package: checkupdates' format, which
--- yay -Qua and paru -Qua also use. A trailing "[ignored]" is pacman.conf's
--- IgnorePkg: the run skips those, so they go to ignoredPending instead of
--- the pending count.
 local function parseVersionLines(output, ignored)
     local items = {}
     local n = 0
@@ -458,8 +391,6 @@ local function parseVersionLines(output, ignored)
     return n, items
 end
 
--- Flatpak has no "name oldver -> newver" line, so the query joins installed
--- and pending by application id (tab-separated name/from/to).
 local function parseTabLines(output, ignored)
     local items = {}
     local n = 0
@@ -483,10 +414,6 @@ local function parseTabLines(output, ignored)
     return n, items
 end
 
--- ── AUR helper resolution ────────────────────────────────────────────────────
-
--- auto tries yay then paru. An explicit choice is trusted as-is and reported
--- missing instead of falling back to another helper.
 local function resolveAurHelper()
     local choice = cfg("aur_helper")
     if choice == "off" then
@@ -512,15 +439,8 @@ local function aurCheckCommand(helper)
         local raw = trim(cfg("aur_check_cmd"))
         return raw ~= "" and raw or nil
     end
-    -- No 2>/dev/null and no formatting pipe here: stderr is inspected below
-    -- to tell a real failure from the "-Qua" family's usual no-updates exit
-    -- code, and the raw output already matches checkupdates' own format.
-    -- LC_ALL=C for the same reason as the checkupdates call: the helpers are
-    -- localized too, and the parser keys on pacman's English markers.
     return "LC_ALL=C " .. helper .. " -Qua"
 end
-
--- ── Publishing ───────────────────────────────────────────────────────────────
 
 local function publish()
     if cfg("show_activity_graph") == true then
@@ -560,8 +480,6 @@ local function publish()
     })
 end
 
--- ── Checking pipeline: pacman → AUR → Flatpak → size → reboot → done ────────
-
 local checkFlatpak
 local checkSize
 local checkReboot
@@ -579,10 +497,6 @@ checkReboot = function()
         finishCheck()
         return
     end
-    -- A kernel upgrade replaces the whole /usr/lib/modules/<version> tree.
-    -- Once the running kernel's own directory is gone, a reboot is what
-    -- switches to the new one. Works for any kernel flavour since it checks
-    -- against `uname -r` directly, without naming one.
     local started = noctalia.runAsync(
         [[test -d "/usr/lib/modules/$(uname -r)" && echo present || echo missing]],
         function(result)
@@ -645,12 +559,6 @@ checkFlatpak = function(ignored)
     end
     step = tr("source.flatpak")
     publish()
-    -- Flatpak tracks commits, so a version string often doesn't move across
-    -- an update. Short commits stand in when it doesn't, joined by
-    -- application id in one awk pass.
-    -- Each call's own output and exit code are captured before piping into
-    -- awk, so a real flatpak failure (e.g. no remote, network down) fails
-    -- the whole command instead of awk quietly succeeding on empty input.
     local cmd = [[
 listOut=$(flatpak list --columns=application,version,active 2>/dev/null); listCode=$?
 updOut=$(flatpak remote-ls --updates --columns=application,version,commit 2>/dev/null); updCode=$?
@@ -712,10 +620,6 @@ local function checkAur(ignored)
             checkFlatpak(ignored)
             return
         end
-        -- "-Qua" (like plain pacman -Qu) exits non-zero for "nothing to
-        -- upgrade" too, so exit code alone can't tell that apart from a real
-        -- failure. A real failure prints something to stderr; "no updates"
-        -- doesn't.
         if result.exitCode ~= 0 and trim(result.stderr or "") ~= "" then
             noctalia.log("arch-updater: " .. helper .. " -Qua failed: " .. trim(result.stderr))
             failCheck(tr("err_aur_failed"))
@@ -751,12 +655,6 @@ startCheck = function()
     publish()
 
     local ignored = ignoreSet()
-    -- checkupdates exits 2 for "no updates" (not an error), 1 for a real
-    -- failure (mirror/db sync, etc). Normalize the former to 0 so only a
-    -- genuine failure reaches result.exitCode below. LC_ALL=C: pacman
-    -- translates the "[ignored]" marker the parser keys on ("[Ignoriert]"
-    -- on a German system), which would route IgnorePkg packages into the
-    -- pending count instead of the ignored section.
     local cmd = [[LC_ALL=C checkupdates 2>/dev/null; code=$?; if [ "$code" -eq 2 ]; then exit 0; fi; exit "$code"]]
     local started = noctalia.runAsync(cmd, function(result)
         if result.timedOut then
@@ -1573,8 +1471,6 @@ done
 if [ -n "$missing" ]; then echo "missing in cache:$missing"; exit 3; fi
 pkexec pacman -U --noconfirm --noprogressbar --color never $files]]
     local quoted = shellQuote(path)
-    -- export LC_ALL=C for the same reason as the update runner: the progress
-    -- count greps for pacman's English "downgrading ..." lines.
     local script = pidWritePrefix() .. "printf '::START %s\\n' \"$(date +%s)\" > " .. quoted
         .. "; { export LC_ALL=C\n" .. body .. "\n} >> " .. quoted .. " 2>&1"
         .. "; printf '::EXIT %s\\n' \"$?\" >> " .. quoted
@@ -1589,15 +1485,10 @@ pkexec pacman -U --noconfirm --noprogressbar --color never $files]]
     saveRunMeta()
 end
 
--- Reverses one run entry: rolling back a package means going from its
--- current `to` version back to `from`.
 local function reversedItem(item)
     return { name = item.name, from = item.to, to = item.from, source = item.source }
 end
 
--- Per-package rollback. The package's dependencies that were updated in the
--- same run ride along in the same transaction (pactree intersected with the
--- run's package list), so a program and its libraries move back together.
 local function startRollback(payload)
     if type(payload) ~= "table" then
         return
@@ -1640,10 +1531,6 @@ local function startRollback(payload)
         local deps = {}
         if not result.timedOut and result.exitCode == 0 then
             for line in (result.stdout or ""):gmatch("[^\n]+") do
-                -- pactree -l prints raw depend strings: version pins
-                -- ("libelf=0.196", "linux-api-headers>=4.10") and soname
-                -- provides included. Strip the constraint so the name can
-                -- match the run's package list.
                 local dep = trim(line):match("^([^<>=]+)")
                 if dep ~= nil and dep ~= "" then
                     table.insert(deps, dep)
@@ -1673,9 +1560,6 @@ local function startRollbackRun(payload)
     runRollback(specs, items)
 end
 
--- Cache availability and reverse-dependency counts for one run, fetched
--- when the panel opens that run's package list: greys out packages whose
--- old file is gone and shows how many installed packages require each one.
 local function probeRun(payload)
     local run = findRun(type(payload) == "table" and payload.at or payload)
     if run == nil then
@@ -1717,11 +1601,6 @@ done]]
     end, SIZE_TIMEOUT_MS)
 end
 
--- ── Requests, lifecycle ──────────────────────────────────────────────────────
-
--- Persists in IGNORE_FILE and takes effect immediately by moving the
--- package out of the current snapshot; n is only decremented when the
--- package was actually listed (entries beyond MAX_LISTED have no name).
 local function payloadPkg(payload)
     return trim(tostring((type(payload) == "table" and payload.pkg or payload) or ""))
 end
@@ -1749,8 +1628,6 @@ local function addIgnore(payload)
     publish()
 end
 
--- Only the panel-managed list is editable here; settings entries and
--- pacman.conf's IgnorePkg are managed where they live.
 local function removeIgnore(payload)
     local name = payloadPkg(payload)
     if name == "" then
@@ -1769,7 +1646,6 @@ local function removeIgnore(payload)
         return
     end
     saveDynamicIgnore()
-    -- A recheck brings the package's pending update (if any) back.
     if phase ~= "running" and phase ~= "checking" then
         startCheck()
     else
@@ -1781,8 +1657,6 @@ local function handle(action, payload)
     if action == "check" then
         startCheck()
     elseif action == "update" then
-        -- Follows the update_mode setting; terminal is the default, like
-        -- the original plugin.
         if cfg("update_mode") == "background" then
             runUpdate()
         else
@@ -1833,14 +1707,6 @@ noctalia.state.watch(REQUEST_KEY, function(value)
     handle(value.action, value)
 end)
 
--- Scriptable control:
---   noctalia msg plugin yuuto/arch-updater:service all check
---   noctalia msg plugin yuuto/arch-updater:service all update
---   noctalia msg plugin yuuto/arch-updater:service all update_background
---   noctalia msg plugin yuuto/arch-updater:service all update_terminal
---   noctalia msg plugin yuuto/arch-updater:service all dismiss
---   noctalia msg plugin yuuto/arch-updater:service all ignore:NAME
---   noctalia msg plugin yuuto/arch-updater:service all unignore:NAME
 function onIpc(event, payload)
     local action, arg = tostring(event):match("^(%w+):(.+)$")
     if action ~= nil then
@@ -1861,10 +1727,6 @@ function update()
         local hours = tonumber(cfg("auto_check_hours")) or 0
         if hours > 0 then
             if phase == "idle" then
-                -- The startup auto-check waits for resumeRunIfActive's log
-                -- probe: if a detached run is still going, starting a check
-                -- first would flip phase to "checking" and the probe's
-                -- callback would decline to re-attach.
                 if resumeProbed then
                     startupTicks += 1
                 end
@@ -1882,10 +1744,6 @@ function update()
 
     if cfg("check_arch_news") == true then
         sinceNewsCheck += 1
-        -- Fires once at startup (== AUTO_CHECK_DELAY), then every
-        -- NEWS_RECHECK_HOURS. Resetting back to AUTO_CHECK_DELAY (not 0)
-        -- keeps the "== AUTO_CHECK_DELAY" branch from re-firing every 10
-        -- seconds.
         if sinceNewsCheck == AUTO_CHECK_DELAY or sinceNewsCheck >= NEWS_RECHECK_HOURS * 3600 + AUTO_CHECK_DELAY then
             if sinceNewsCheck > AUTO_CHECK_DELAY then
                 sinceNewsCheck = AUTO_CHECK_DELAY

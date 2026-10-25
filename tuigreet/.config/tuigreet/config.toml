@@ -1,12 +1,6 @@
-# tuigreet — login screen for greetd on niri (CachyOS)
-# Palette matches the niri/noctalia desktop:
-#   indigo #7567e4 · pink #de61d0 · deep background #0f0b33
-# greetd runs: tuigreet --time --remember --asterisks --cmd niri-session
-# Everything below overrides/extends those flags.
 
 [general]
 log_file = "/tmp/tuigreet.log"
-# pre-fill the username field (same as --remember, but explicit)
 default_user = "computing"
 
 [display]
@@ -57,9 +51,6 @@ text = "#cfc9ff"
 time = "#b9b2ff"
 
 [background]
-# "matrix-peak": rainbow wave, hot pink head. Requires the patched tuigreet
-# from tuigreet-patch/build-matrix-peak.sh (stock tuigreet only knows
-# doom|matrix and would render no background at all).
 kind = "matrix-peak"
 fps = 30
 
@@ -67,9 +58,6 @@ fps = 30
 head_color = "#ff46a2"
 bright_color = "#de61d0"
 dim_color = "#2b1b5e"
-# Rainbow wave instead of the three fixed bands. hue_step = degrees of hue per
-# column (how wide the wave is), hue_speed = degrees per frame (how fast it
-# scrolls; negative reverses).
 rainbow = true
 hue_step = 3.0
 hue_speed = 2.5
@@ -77,13 +65,3 @@ min_length = 6
 max_length = 22
 min_speed = 0.2
 max_speed = 0.9
-
-# Optional: pin the login screen to one monitor.
-# eDP-1 = laptop panel, HDMI-A-1 = external. Uncomment to force one.
-# [[outputs]]
-# connector = "eDP-1"
-# primary = true
-#
-# [[outputs]]
-# connector = "HDMI-A-1"
-# enabled = false

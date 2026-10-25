@@ -1,18 +1,10 @@
 --!strict
 
--- Shared YT Music API constants.
--- Scope: api/* only. service.luau / panel.luau never touch these directly.
-
 local XDG_CACHE = noctalia.getenv("XDG_CACHE_HOME")
 local CACHE_ROOT = noctalia.expandPath(XDG_CACHE and XDG_CACHE ~= "" and XDG_CACHE or "~/.cache") .. "/yt-music"
 
 local EXPO = {}
 
--- The InnerTube API key is a SECRET and must never live in this repo.
--- Resolution order:
---   1. environment variable  YT_MUSIC_KEY
---   2. key file              ~/.local/share/yt-music/key  (chmod 600, outside the repo)
--- Fails loudly (notification + error) when neither is present.
 local KEY_ENV = "YT_MUSIC_KEY"
 local KEY_FILE = noctalia.expandPath("~/.local/share/yt-music/key")
 

@@ -1,8 +1,4 @@
 --!nonstrict
--- NCS Visualizer - Control Center tile.
--- Click: show / hide the orb. Right-click: open the plugin settings.
--- Holds no logic of its own: mirrors the service's "status" and sends actions
--- on the "command" channel.
 
 local function apply(status)
     local s = if type(status) == "table" then status else {}

@@ -93,8 +93,6 @@ local function build_playlist_view()
 		})
 	end
 
-	-- Which rows are on screen: the filter decides, and the pagination below
-	-- walks this list. Filter first, then paginate, exactly like the queue page.
 	local query = view.playlist_text_filter or ""
 	local filtering = query ~= ""
 	local order = {}
@@ -110,9 +108,6 @@ local function build_playlist_view()
 		end
 	end
 
-	-- What a click queues: the matches when filtering, otherwise the playlist
-	-- itself (shared, not copied). Rows and Play all both use this, so the queue
-	-- always matches what is on screen.
 	local queue_items = pl.tracks
 	if filtering then
 		queue_items = {}
@@ -121,7 +116,6 @@ local function build_playlist_view()
 		end
 	end
 
-	-- Subtitle mirrors the queue/offline headers: one muted line under the title.
 	local declared_total = state.data.playlist.count
 	local playlist_total_text
 	if declared_total and declared_total > #pl.tracks then
@@ -130,8 +124,6 @@ local function build_playlist_view()
 		playlist_total_text = #pl.tracks .. " total"
 	end
 
-	-- Filter sits with the actions, ahead of the buttons, and only appears when
-	-- there is something to filter — same rule as the queue and offline headers.
 	local header_right = {}
 	if #pl.tracks > 0 then
 		table.insert(
@@ -172,9 +164,6 @@ local function build_playlist_view()
 			variant = "primary",
 			controlSize = "md",
 			onClick = function()
-				-- Filtered: queue what is on screen. Otherwise stay on the existing
-				-- path, which also covers the window where a refresh has cleared the
-				-- list and only the cache is available to play.
 				if filtering and #queue_items > 0 then
 					request(
 						"replace_queue_and_play",
@@ -243,8 +232,6 @@ local function build_playlist_view()
 		for pos = page_start, page_end do
 			local abs_idx = order[pos]
 			local t = abs_idx and pl.tracks[abs_idx]
-			-- Position within the queued list: the matches when filtering, the
-			-- playlist otherwise (identical to abs_idx without a filter).
 			local queue_pos = pos
 			if t then
 				table.insert(
@@ -264,12 +251,8 @@ local function build_playlist_view()
 
 		local has_prev = (view.playlist_view_page > 0)
 		local has_next_page = (view.playlist_view_page < total_pages - 1)
-		-- While filtering, Next only walks the matches: reaching for another
-		-- continuation mid-filter would stream in rows the user never asked for.
 		local can_fetch_more = not filtering
 			and (pl.next_token ~= nil and pl.next_token ~= "")
-			-- YT hands out continuations even for fully-loaded lists; once the
-			-- declared count is on screen there is nothing real left to fetch
 			and not ((pl.count or 0) > 0 and #pl.tracks >= pl.count)
 		local has_next = has_next_page or can_fetch_more
 
@@ -350,11 +333,7 @@ local function build_playlist_view()
 		)
 	end
 
-	-- YT's suggestion shelf for this playlist: rendered outside pagination,
-	-- clicking a row plays it now while the rest of the queue continues.
 	local sugg = pl.suggestions or {}
-	-- The shelf is filtered by the same query, and its heading is dropped
-	-- entirely when nothing matches rather than sitting over an empty list.
 	local shown_sugg = {}
 	for si, s in ipairs(sugg) do
 		if common.fuzzy_match(query, (s.title or "") .. " " .. (s.artist or "")) then

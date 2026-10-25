@@ -1,17 +1,3 @@
-# Desktop Essentials - clock, weather and DeepSeek price as Noctalia DESKTOP widgets.
-#
-# Local replacement for the three eww desktop widgets (eww.yuck: clock, weather,
-# deepseek). Same data sources / same click behaviour, rendered by the shell:
-#   clock    -> 12h time + day + date, click spawns (or focuses) calcurse for
-#               editing events; the control-center calendar tab is the BAR
-#               clock's left click (hardcoded panel-toggle control-center calendar)
-#   weather  -> one-line wttr.in text from ~/.config/eww/scripts/weather.sh,
-#               click opens the Noctalia control-center weather tab
-#   deepseek -> peak/off-peak rate + countdown from
-#               ~/.config/eww/scripts/deepseek_price.sh
-#
-# Placement (which monitor) is per-instance: output = "eDP-1" in the winning
-# config layer's [desktop_widgets.widget.<id>] blocks.
 id = "computing/desktop-essentials"
 name = "Desktop Essentials"
 version = "1.0.0"

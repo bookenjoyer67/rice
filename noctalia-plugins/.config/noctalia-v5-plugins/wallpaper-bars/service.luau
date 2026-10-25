@@ -1,19 +1,4 @@
 --!nonstrict
--- wallpaper-bars service.
---
--- Two feeds, both published through noctalia.state:
---   "levels"  cava spectrum, 0..1 per band, ~fps times a second
---   "grids"   one wallpaper colour grid per output that has one of our widgets
---
--- A grid is produced by ImageMagick: find every desktop widget of this plugin
--- in the layout, take its real rect on its own output, map that rect onto that
--- output's wallpaper with a "cover" fit (what the compositor draws), crop it,
--- then average it down to one colour per band column and grid row. It is
--- re-derived whenever a wallpaper or a box changes - that is what makes the
--- bars adapt to the environment instead of a fixed palette.
---
--- One cava feeds every output; each widget draws the newest frame its own
--- refresh rate allows.
 
 local ROWS = 24
 local POLL_MS = 5000
@@ -43,8 +28,6 @@ local signatures = {} -- per output: wallpaper path + mtime + rect + grid size
 local sampling = {}   -- per output: in-flight guard
 local grids = {}      -- per output: last published colour grid
 
--- ---------------------------------------------------------------- settings.toml
-
 local function stripValue(raw)
   raw = raw:gsub("%s+#.*$", "")
   local q = raw:match('^"(.*)"$')
@@ -68,8 +51,6 @@ local function stripValue(raw)
   return raw
 end
 
--- Minimal, line-oriented reader: we only need [wallpaper.*] and the
--- [desktop_widgets.widget.<id>] blocks, not a general TOML parser.
 local function parseSettings(text)
   local res = { wallpapers = {}, widgets = {} }
   local cur = nil
@@ -106,8 +87,6 @@ local function readSettings()
   return parseSettings(text)
 end
 
--- ---------------------------------------------------------------- geometry
-
 local function outputFor(name)
   local list = noctalia.outputs() or {}
   for _, o in ipairs(list) do
@@ -123,8 +102,6 @@ local function outputFor(name)
   return list[1]
 end
 
--- Rect of the widget on its output, clamped to it. Falls back to the whole
--- output when the layout entry has no box yet (freshly dropped widget).
 local function widgetRect(w, out)
   local ow = num(out.width, 1920)
   local oh = num(out.height, 1080)
@@ -164,7 +141,6 @@ local function wallpaperPath(parsed, outName)
   return fallbackWallpaper
 end
 
--- One entry per output: the first widget of ours placed there.
 local function collectTargets(parsed)
   local targets = {}
   local focus = noctalia.focusedOutputName() or ""
@@ -180,24 +156,16 @@ local function collectTargets(parsed)
   return targets
 end
 
--- ---------------------------------------------------------------- sampling
-
 local function publish(name, grid)
   grids[name] = grid
   noctalia.state.set("grids", grids)
 end
 
--- shell-quote a path for the one composed magick pipeline
 local function shq(s)
   return "'" .. tostring(s):gsub("'", "'\\''") .. "'"
 end
 
 local function sample(name, path, x0, y0, x1, y1, out, signature)
-  -- The in-flight flag used to be cleared only inside the async callbacks, so a
-  -- callback that died (Luau CPU budget, parse error) left it true forever and
-  -- every later resample returned early with no log line: the bars then kept
-  -- the colour grid of a wallpaper that was no longer on screen. Treat an
-  -- attempt older than SAMPLE_TIMEOUT_MS as dead.
   local started = sampling[name]
   if started ~= nil and (noctalia.nowMs() - started) < SAMPLE_TIMEOUT_MS then
     return
@@ -223,7 +191,6 @@ local function sample(name, path, x0, y0, x1, y1, out, signature)
         return
       end
 
-      -- cover fit: the wallpaper is scaled to fill the output, then centred
       local ow, oh = num(out.width, 1920), num(out.height, 1080)
       local scale = math.max(ow / iw, oh / ih)
       local dispW, dispH = iw * scale, ih * scale
@@ -240,11 +207,6 @@ local function sample(name, path, x0, y0, x1, y1, out, signature)
       local ch = math.clamp(math.ceil(iy1 - iy0), 1, ih - cy)
       local crop = tostring(cw) .. "x" .. tostring(ch) .. "+" .. tostring(cx) .. "+" .. tostring(cy)
 
-      -- Reduce to bare hex INSIDE the pipeline: parsing a full `txt:-` dump
-      -- (~40 bytes per pixel) in Luau is what blew the callback CPU budget.
-      -- Output is one line, 6 hex digits per pixel, row-major. A small blur on
-      -- the tiny grid merges neighbouring colours, so the mist does not read
-      -- as sharp colour stripes.
       local pipeline = string.format(
         "magick %s -auto-orient -crop %s +repage -resize %dx%d! -blur 0x%.2f -depth 8 txt:- "
           .. "| sed -n 's/.*#\\([0-9A-Fa-f]\\{6\\}\\).*/\\1/p' | tr -d '\\n'",
@@ -286,8 +248,6 @@ local function sample(name, path, x0, y0, x1, y1, out, signature)
   end)
 end
 
--- ---------------------------------------------------------------- cava
-
 local function onLine(line)
   local vals = {}
   local n = 0
@@ -327,9 +287,6 @@ local function startCava()
     "source = " .. tostring(source),
   }, "\n")
   noctalia.writeFile(cavaConf, conf)
-  -- A cava from a previous instance survives a hot reload / plugin bounce; a
-  -- second reader on the same monitor then keeps the widget silent. Replace it
-  -- in the SAME shell as the spawn, so the kill can never land on the new one.
   local cmd = "exec sh -c \"pkill -f '^cava -p " .. cavaConf .. "' >/dev/null 2>&1; "
     .. "sleep 0.2; exec cava -p " .. cavaConf .. "\""
   local ok = noctalia.runStream(cmd, onLine)
@@ -338,8 +295,6 @@ local function startCava()
     noctalia.log("wallpaper-bars: could not start cava")
   end
 end
-
--- ---------------------------------------------------------------- poll loop
 
 local function refresh()
   local parsed = readSettings()
@@ -364,10 +319,6 @@ local function refresh()
 end
 
 function update()
-  -- cava watchdog. A stream that never produced a single line counts as dead
-  -- too: `lastLineMs == 0` used to disable the check entirely, so a cava that
-  -- failed to start (or was killed by a previous instance's onExit) stayed
-  -- dead until the shell restarted.
   local now = noctalia.nowMs()
   local silentFor
   if lastLineMs == 0 then
@@ -383,8 +334,6 @@ function update()
 end
 
 function onExit()
-  -- anchored: an unanchored -f pattern also matches a sibling shell whose
-  -- command line merely mentions the conf
   noctalia.runAsync("pkill -f '^cava -p " .. cavaConf .. "'")
 end
 

@@ -1,13 +1,4 @@
 --!nonstrict
--- Recording indicator — bar widget.
---
--- Shows a pulsing red REC dot (plus elapsed time) ONLY while a screen
--- recording is running, so the bar stays clean otherwise. The state comes from
--- ~/.config/noctalia/scripts/record-status.sh, which reads wf-recorder's
--- pidfile / process table and OBS's open output file.
---
--- Left click stops the current recording by running the same toggle script the
--- Mod+Shift+R bind uses (~/.config/niri/scripts/record-screen.sh).
 
 local STATUS = "bash \"$HOME/.config/noctalia/scripts/record-status.sh\""
 local TOGGLE = "bash \"$HOME/.config/niri/scripts/record-screen.sh\""
@@ -46,8 +37,6 @@ local function render()
       barWidget.setTooltip("Not recording")
       return
     end
-    -- Idle but configured to stay on the bar: draw a dim idle icon, since
-    -- setGlyph has no effect once a render() tree is active.
     barWidget.render(ui.row({ gap = 4, align = "center" }, {
       ui.glyph({ name = "player-record", size = 11, color = "on_surface_variant" }),
     }))
@@ -63,7 +52,6 @@ local function render()
   local showElapsed = noctalia.getConfig("show_elapsed")
   if showElapsed == nil then showElapsed = true end
 
-  -- Pulse between full and faded red once per second.
   local color = "error"
   if blink and (tick % 2 == 1) then
     color = "error/0.35"
@@ -121,7 +109,6 @@ end
 
 function update()
   tick = tick + 1
-  -- Blink and the clock must advance even without a fresh probe.
   render()
   if checking then return end
   checking = true
@@ -144,7 +131,6 @@ function onClick()
     if res and res.exitCode ~= 0 then
       noctalia.notifyError("Stop recording failed", tostring(res.stderr or ""))
     end
-    -- Re-probe immediately so the dot disappears without waiting a tick.
     checking = false
     update()
   end, 60000)

@@ -6,10 +6,8 @@ vim.g.mapleader = " "
 
 vim.opt.swapfile = false
 
--- Yank/delete go to the system clipboard (Wayland: wl-copy).
 vim.opt.clipboard = "unnamedplus"
 
--- Navigate vim panes better
 vim.keymap.set('n', '<c-k>', ':wincmd k<CR>')
 vim.keymap.set('n', '<c-j>', ':wincmd j<CR>')
 vim.keymap.set('n', '<c-h>', ':wincmd h<CR>')

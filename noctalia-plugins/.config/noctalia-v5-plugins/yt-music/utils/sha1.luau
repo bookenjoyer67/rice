@@ -1,8 +1,5 @@
 --!strict
 
--- Pure-Luau SHA-1 (FIPS 180-1), uint32 math via bit32.
--- Generic primitive shared by auth hashing and content-addressed filenames.
-
 local bit = bit32
 
 local function sha1(msg: string): string

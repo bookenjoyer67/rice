@@ -1,7 +1,5 @@
 --!strict
 
--- browse/home/library endpoints + parse.
-
 local logger = require("../utils/log.luau")
 local log = logger.module("ytapi", "browse")
 
@@ -135,7 +133,6 @@ function EXPO.playlist_page(
 			local data = noctalia.json.decode(out)
 			if type(data) == "table" then
 				local tracks = type(data.tracks) == "table" and data.tracks or {}
-				-- YT duplicates shelf rows inside one payload; keep first-seen only
 				local seen, uniq = {}, {}
 				for _, tr in ipairs(tracks) do
 					if tr.id and not seen[tr.id] then
@@ -172,9 +169,6 @@ function EXPO.playlist_page(
 	end, true)
 end
 
--- Artist page (browseId UC…): top-ish tracks from the first shelves plus
--- albums/singles/playlists as related rows. Offline callers get nothing —
--- the network gate skips the script.
 function EXPO.artist_page(browse_id: string, cb: (any) -> ())
 	if type(browse_id) ~= "string" or browse_id == "" then
 		cb({ tracks = {}, related = {} })
@@ -273,7 +267,6 @@ function EXPO.fetch_quick_picks(callback: ((any?, any?) -> ())?)
 					local j = math.random(1, i)
 					mixes[i], mixes[j] = mixes[j], mixes[i]
 				end
-				-- Keep up to 24 candidate mixes for filtering
 				for i = #mixes, 25, -1 do
 					table.remove(mixes)
 				end

@@ -1,17 +1,4 @@
 #!/usr/bin/env bash
-# ---------------------------------------------------------------------------
-# niri / Noctalia rice — installer
-#
-# Symlinks every package in this repo into $HOME (no stow required). Any file
-# or directory it would overwrite is moved aside to <name>.bak-<timestamp>
-# first, so nothing is ever destroyed.
-#
-#   ./install.sh                 link configs into $HOME
-#   ./install.sh --dry-run       show what would happen, touch nothing
-#   ./install.sh --build-shim    also compile noctalia-layer-swap.so
-#   ./install.sh --no-bars       skip compiling wallpaper-bars-gpu
-#   ./install.sh --with-system   also install /etc/greetd/config.toml (sudo)
-# ---------------------------------------------------------------------------
 set -euo pipefail
 shopt -s nullglob
 
@@ -60,7 +47,6 @@ done
 say() { printf '%s\n' "$*"; }
 run() { if [ "$DRY" -eq 1 ]; then say "  would: $*"; else "$@"; fi; }
 
-# link_obj <src> <dest> — idempotent symlink with backup of anything in the way
 link_obj() {
   local src="$1" dest="$2"
   if [ -L "$dest" ]; then
@@ -78,9 +64,6 @@ link_obj() {
   say "  link      ${dest/#$HOME/\~}"
 }
 
-# Mirror a package into $HOME. Shared platform directories are recursed into;
-# everything else is owned wholesale by the package (backed up, then linked),
-# so two packages can never fight over ~/.local/bin or ~/.config/niri.
 is_container() {
   case "$1" in
     "$HOME"|"$HOME/.config"|"$HOME/.local"|"$HOME/.local/bin"|\
@@ -111,17 +94,9 @@ _mirror() {
 
 link_pkg() { _mirror "$1" "$HOME"; }
 
-# --- packages --------------------------------------------------------------
-# Everything the configs spawn. Guarded by `pacman -Q`, so rerunning on a
-# configured machine is a no-op instead of a 40-package reinstall prompt.
 pkg_installed() { pacman -Q "$1" >/dev/null 2>&1; }
 
-# AUR builds need makepkg. A minimal Arch install has neither an AUR helper nor
-# base-devel, so pull the toolchain in rather than skipping the one package the
-# rice actually needs from the AUR.
 ensure_build_tools() {
-  # `makepkg` ships with pacman itself, so it is not a marker for base-devel.
-  # fakeroot + debugedit are: makepkg refuses to build without them.
   command -v paru >/dev/null 2>&1 && return 0
   command -v yay >/dev/null 2>&1 && return 0
   if command -v fakeroot >/dev/null 2>&1 && command -v debugedit >/dev/null 2>&1; then
@@ -178,8 +153,6 @@ if [ "$DEPS" -eq 1 ]; then
     elif [ "$DRY" -eq 1 ]; then
       say "  would: pacman -S --needed ${MISSING[*]}"
     else
-      # A fresh install boots with an empty sync database: `pacman -S` then fails
-      # with "package not found" even though the package exists. Refresh first.
       if ! pacman -Si "${MISSING[0]}" >/dev/null 2>&1; then
         say "  refresh   pacman -Sy (empty sync database)"
         sudo pacman -Sy --noconfirm >/dev/null || say "  WARN      pacman -Sy failed"
@@ -218,7 +191,6 @@ for dir in "$REPO"/*/; do
   case "$pkg" in
     system|screenshots|assets|eww|wofi) continue ;;
   esac
-  # only packages that actually contain dotfiles
   if [ -d "$dir/.config" ] || [ -d "$dir/.local" ] || [ -d "$dir/.screenlayout" ] \
      || [ -e "$dir/.zshrc" ]; then
     say "$pkg"
@@ -226,9 +198,6 @@ for dir in "$REPO"/*/; do
   fi
 done
 
-# --- editor plugins --------------------------------------------------------
-# lazy.nvim bootstraps itself on first start, but that leaves the first real
-# `nvim` session downloading plugins with an empty UI. Sync headlessly instead.
 say ""
 say "Neovim plugins"
 if [ ! -e "$HOME/.config/nvim/init.lua" ]; then
@@ -245,24 +214,11 @@ else
   fi
 fi
 
-# --- Brave Origin profile + theme ------------------------------------------
-# Noctalia's community "brave" template writes into
-# ~/.config/BraveSoftware/Brave-Browser (hardcoded upstream) while Brave Origin
-# keeps its profile in Brave-Origin, and the theme it renders is an *unpacked*
-# extension that upstream expects you to load by hand. brave-origin-theme.py
-# handles both: relative symlink, then the Chromium unpacked-extension entry.
 say ""
 if [ -x "$HOME/.local/bin/brave-origin-theme.py" ]; then
   if [ "$DRY" -eq 1 ]; then
     "$HOME/.local/bin/brave-origin-theme.py" --check
   else
-    # Two passes on purpose. The helper can only register the theme once
-    # ~/.local/share/noctalia/brave-theme/manifest.json exists, and that is
-    # created by Noctalia's `brave` community template — which declares
-    #   requires_path = "~/.config/BraveSoftware/Brave-Browser"
-    # and therefore renders nothing until the first pass has made the
-    # Brave-Browser -> Brave-Origin symlink. First pass makes the link, second
-    # pass writes the unpacked-extension entry into Preferences.
     "$HOME/.local/bin/brave-origin-theme.py"
     if [ ! -f "$HOME/.local/share/noctalia/brave-theme/manifest.json" ]; then
       if pgrep -x noctalia >/dev/null 2>&1; then
@@ -283,10 +239,6 @@ else
   say "Brave origin theme helper not linked yet (run install.sh again after linking)"
 fi
 
-# --- fastfetch --------------------------------------------------------------
-# The config carries an absolute logo path (fastfetch's kitty-direct logo reads
-# the file directly), so it is rendered rather than symlinked, like the Noctalia
-# state. Everything else in ~/.config/fastfetch is copied.
 FF_DIR="$REPO/fastfetch"
 say ""
 say "fastfetch"
@@ -307,11 +259,6 @@ else
   say "  missing   fastfetch/config.jsonc"
 fi
 
-# --- starship ---------------------------------------------------------------
-# The prompt palette is generated from the wallpaper (matugen template
-# templates/starship.toml). starship has no include mechanism, so the whole file
-# is generated: ship a fallback for the window before matugen first runs, and
-# render immediately when a wallpaper is already known.
 say ""
 say "starship"
 STAR_DST="$HOME/.config/starship.toml"
@@ -337,9 +284,6 @@ if [ ! -f "$STAR_DST" ] && [ -f "$REPO/starship/fallback.toml" ]; then
   say "  fallback  ~/.config/starship.toml (until the first wallpaper change)"
 fi
 
-# --- fonts ------------------------------------------------------------------
-# The terminal font is a Nerd Font; kitty silently falls back to whatever
-# fontconfig picks if the family is missing, which looks like a broken rice.
 say ""
 say "Fonts"
 if command -v fc-match >/dev/null 2>&1; then
@@ -353,8 +297,6 @@ if command -v fc-match >/dev/null 2>&1; then
 else
   say "  skip      fontconfig not installed yet"
 fi
-# starship's format uses emoji (💻 👤 📁 🕰); Nerd Fonts cover the private-use
-# glyphs but not these, so without an emoji font the prompt renders tofu boxes.
 if command -v fc-list >/dev/null 2>&1; then
   if fc-list ':charset=1f4bb' family 2>/dev/null | grep -q .; then
     say "  ok        emoji coverage (U+1F4BB)"
@@ -363,9 +305,6 @@ if command -v fc-list >/dev/null 2>&1; then
   fi
 fi
 
-# --- wallpaper pool ---------------------------------------------------------
-# ~/.config/wallpaper/pool.txt is the user's own file: seed it if missing,
-# never overwrite, and never symlink it into the repo.
 POOL_DST="$HOME/.config/wallpaper/pool.txt"
 say ""
 say "Wallpaper pool"
@@ -377,27 +316,11 @@ else
   say "  seed      ~/.config/wallpaper/pool.txt"
 fi
 
-# --- Noctalia state ---------------------------------------------------------
-# The shell's effective config lives in ~/.local/state/noctalia/settings.toml and
-# loads AFTER ~/.config/noctalia/bar.toml. It is where plugin enablement, the
-# desktop widgets, the lockscreen widgets and the theme/template choices actually
-# live: without it a fresh install renders an empty bar with none of the rice's
-# plugins loaded, no desktop cat/clock/weather and no lockscreen layout.
-# Shipped as a template because it carries absolute paths (/home/computing).
 STATE_SRC="$REPO/noctalia-state/settings.toml"
 STATE_DST="$HOME/.local/state/noctalia/settings.toml"
 say ""
 say "Noctalia state"
 
-# Noctalia binds every desktop widget and lockscreen box to an output BY NAME
-# (`output = "HDMI-A-1"`). The shipped state carries the names off the machine it
-# was recorded on, so a box with different outputs (a VM's Virtual-1) creates no
-# widget surfaces at all: the plugins load, the log says so, the desktop is just
-# empty. Retargeting also has to drop the duplicates that collapsing two recorded
-# outputs into one produces — otherwise you get two clocks, two bar groups.
-#
-# The work lives in local-bin/.local/bin/noctalia-widget-retarget.py so it can be
-# rerun by hand (and, later, from a session-start hook) instead of only here.
 retarget_widget_outputs() {
   local f="$1"
   shift
@@ -432,11 +355,6 @@ else
   say "  missing   noctalia-state/settings.toml"
 fi
 
-# --- cursor theme ----------------------------------------------------------
-# 13 MB asset rather than 261 MB of loose cursor files. niri aborts cursor
-# loading entirely when XCURSOR_THEME (session/environment.d) points at a theme
-# that is not installed: the pointer disappears and the log reads
-#   WARN niri::cursor: error loading xcursor default@24: no default icon
 CURSOR_TAR="$REPO/cursors/Bibata-Rainbow-Modern.tar.zst"
 CURSOR_DIR="$HOME/.icons/Bibata-Rainbow-Modern"
 say ""
@@ -457,9 +375,6 @@ else
   say "  missing   cursors/Bibata-Rainbow-Modern.tar.zst"
 fi
 
-# --- user units that the session needs -------------------------------------
-# Enabled with symlinks so this works without a live user manager. niri-session
-# starts graphical-session.target; units outside that target never come up.
 say ""
 say "Session units"
 for unit in awww-daemon.service lock-on-sleep.service; do
@@ -473,12 +388,6 @@ for unit in awww-daemon.service lock-on-sleep.service; do
   fi
 done
 
-# --- the LD_PRELOAD shim ---------------------------------------------------
-# Desktop widgets are their own layer surfaces. Without the shim they are still
-# drawn, but niri scales them with the workspace in the overview instead of
-# pinning them to the backdrop, which breaks the "widgets live on the desktop"
-# look. It is built by default because a fresh install must look right, not
-# almost right.
 say ""
 if [ "$SHIM" -eq 1 ]; then
   say "Building noctalia-layer-swap.so"
@@ -488,7 +397,6 @@ if [ "$SHIM" -eq 1 ]; then
   elif ! command -v make >/dev/null 2>&1 || ! command -v cc >/dev/null 2>&1; then
     say "  SKIP      no C toolchain (make + cc): install base-devel, then rerun"
   else
-    # the Makefile's target IS $HOME/.local/lib/noctalia-layer-swap.so — no copy needed
     make -C "$REPO/layer-swap/.local/src/noctalia-layer-swap"
     if [ -f "$HOME/.local/lib/noctalia-layer-swap.so" ]; then
       say "  installed ~/.local/lib/noctalia-layer-swap.so"
@@ -502,12 +410,6 @@ else
   say "but desktop widgets will zoom with the workspace in the overview."
 fi
 
-
-# --- the GPU cava bars -----------------------------------------------------
-# The wallpaper-bars widget was replaced by a layer-shell GLES renderer because
-# cairo rasterising ~1400 translucent boxes per output cost about a full core.
-# The binary is a build artifact, not a tracked file, so a fresh install has to
-# compile it or the spawn-at-startup line in config.kdl points at nothing.
 say ""
 if [ "$BARS" -eq 1 ]; then
   BARS_SRC="$REPO/wallpaper-bars-gpu/.local/src/wallpaper-bars-gpu"
@@ -538,17 +440,11 @@ else
   say "so the cava bars simply do not appear."
 fi
 
-# --- system greeter config -------------------------------------------------
 if [ "$SYSTEM" -eq 1 ]; then
   say ""
   say "Installing /etc/greetd/config.toml (sudo)"
   run sudo install -m 644 "$REPO/system/greetd/config.toml" /etc/greetd/config.toml
   say "  The session launched by the greeter is set by --cmd in that file."
-  # tuigreet runs as the `greeter` user, whose HOME is / — it therefore never
-  # reads ~/.config/tuigreet and only loads the system path. Without this copy a
-  # fresh box gets the stock greeter: no theme colours, no title, no matrix rain.
-  # The title is a brand string from the repo (custom_title), not the distro id:
-  # only the pre-filled username is machine state, so only that is rendered here.
   TUI_SRC="$REPO/tuigreet/.config/tuigreet/config.toml"
   tui_title="$(sed -n 's/^custom_title = "\(.*\)"$/\1/p' "$TUI_SRC" | head -1)"
   tui_user="${SUDO_USER:-${USER:-}}"
@@ -561,10 +457,6 @@ if [ "$SYSTEM" -eq 1 ]; then
   fi
   sed -e "s|^default_user = .*|$tui_user_line|" \
       "$TUI_SRC" > "$tui_tmp"
-  # The shipped background is the patched "matrix-peak" (tuigreet-patch/).
-  # Stock tuigreet only knows doom|matrix: an unknown kind silently renders no
-  # background at all, so degrade to "matrix" when the patched binary that the
-  # greeter would resolve is not installed.
   tui_kind="$(sed -n 's/^kind = "\(.*\)"$/\1/p' "$tui_tmp" | head -1)"
   if [ "$tui_kind" = "matrix-peak" ] && [ ! -x /usr/local/bin/tuigreet ]; then
     sed -i 's/^kind = "matrix-peak"/kind = "matrix"/' "$tui_tmp"

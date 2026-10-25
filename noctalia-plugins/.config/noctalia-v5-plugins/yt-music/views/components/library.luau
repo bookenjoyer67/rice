@@ -59,7 +59,6 @@ local function build_library()
 
 	table.insert(child, ui.row({ key = "spacer-lib-1", height = 8, borderWidth = 0, radius = theme.radius }))
 
-	-- Filter chips
 	local chips = {
 		{ id = "all", label = "All" },
 		{ id = "playlists", label = "Playlists" },
@@ -88,7 +87,6 @@ local function build_library()
 	table.insert(child, ui.row({ key = "lib-chips-row", align = "center", gap = 8, radius = theme.radius }, chip_elems))
 	table.insert(child, ui.row({ key = "spacer-lib-2", height = 14, borderWidth = 0, radius = theme.radius }))
 
-	-- Filter items
 	local query = view.library_text_filter or ""
 	local items = {}
 	local liked_item = nil

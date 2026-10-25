@@ -53,8 +53,6 @@ local function load_cookie_values()
 end
 
 local auth_state = { ready = false, sapisid = "", cookie = "" }
--- SAPISIDHASH is stable for a whole second; memoize so a boot burst of
--- requests pays the pure-Luau SHA-1 once instead of per request.
 local auth_memo_ts: number?, auth_memo_header: string? = nil, nil
 
 function EXPO.invalidate_auth()

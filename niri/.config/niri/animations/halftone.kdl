@@ -1,4 +1,3 @@
-// Traditional burn appearance, orange glowy look
 animations {
     workspace-switch {
         duration-ms 300

@@ -1,7 +1,5 @@
 --!strict
 
--- Track stats (views/likes) fetched via yt-dlp, cached in a single JSON file.
-
 local logger = require("../utils/log.luau")
 local network = require("../utils/network.luau")
 local log = logger.module("ytapi", "stats")

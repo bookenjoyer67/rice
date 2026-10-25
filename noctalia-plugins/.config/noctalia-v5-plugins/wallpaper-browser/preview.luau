@@ -1,15 +1,4 @@
 --!nonstrict
--- Full-size preview of one wallpaper, in its own floating panel.
---
--- Opened by the browser's per-tile preview button, which runs:
---   noctalia msg panel-open computing/wallpaper-browser:preview <id>
--- (panel-open, not panel-toggle: an idempotent open lets you walk tile to tile
--- without the panel closing under you). Opened with no id it falls back to the
--- wallpaper that is currently applied, so it is never a blank window.
---
--- The image is resolved through the public /api/v1/w/<id> endpoint (apikey
--- appended from the settings file when one is set), downloaded once into
--- ~/.cache/wallpaper/preview/ and reused afterwards.
 
 local CACHE_DIR = noctalia.expandPath("~/.cache/wallpaper")
 local PREVIEW_DIR = CACHE_DIR .. "/preview"
@@ -190,12 +179,9 @@ local function prepare(id)
     end)
 end
 
--- ---------------------------------------------------------------- lifecycle
-
 function onOpen(context)
     local id = trim(context)
     if id == "" then
-        -- no context: show what is on the desktop right now
         local ok, text = pcall(noctalia.readFile, CACHE_DIR .. "/current.id")
         if ok and type(text) == "string" then
             id = trim(text)
@@ -205,10 +191,6 @@ function onOpen(context)
 end
 
 function onClose()
-    -- A second panel of the same plugin hides the browser rather than closing
-    -- it, so closing the preview would otherwise leave nothing on screen.
-    -- panel-open is idempotent: it brings the browser back whether the panel
-    -- manager still considers it open or not.
     noctalia.runAsync({ "noctalia", "msg", "panel-open", "computing/wallpaper-browser:browser" })
 end
 

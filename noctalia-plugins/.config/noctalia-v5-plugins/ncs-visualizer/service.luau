@@ -1,16 +1,4 @@
 --!nonstrict
--- NCS Visualizer - headless service.
---
--- Runs for the whole session and owns the companion renderer, `aurora-ncs`:
---   * finds every orb placed in the desktop-widget editor and where it is,
---   * resolves the colours (theme or custom) and the other settings,
---   * writes them to a JSON config the renderer follows live,
---   * starts the renderer when there is something to draw, and stops it by
---     removing the config when there is not,
---   * keeps a heartbeat file fresh so the renderer exits if Noctalia goes away.
---
--- The desktop widget and the Control Center tile are thin clients: they read
--- the published "status" and send actions on the "command" channel.
 
 noctalia.setUpdateInterval(1000)
 
@@ -45,8 +33,6 @@ local function log(msg)
     noctalia.log(`ncs-visualizer: {msg}`)
 end
 
--- ── Persistence ─────────────────────────────────────────────────────────
-
 local function loadEnabled()
     local raw = noctalia.readFile(ENABLED_FILE)
     enabled = raw == nil or noctalia.string.trim(raw) ~= "0"
@@ -55,8 +41,6 @@ end
 local function saveEnabled()
     noctalia.writeFile(ENABLED_FILE, if enabled then "1" else "0")
 end
-
--- ── Dependencies ────────────────────────────────────────────────────────
 
 local function rendererBinary(): string?
     local custom = noctalia.getConfig("renderer_path")
@@ -73,15 +57,12 @@ local function rendererBinary(): string?
     if noctalia.commandExists(RENDERER) then
         return RENDERER
     end
-    -- Noctalia is often started without ~/.local/bin on PATH.
     local localBin = noctalia.expandPath(`~/.local/bin/{RENDERER}`)
     if noctalia.fileExists(localBin) then
         return localBin
     end
     return nil
 end
-
--- ── Placement ───────────────────────────────────────────────────────────
 
 local function collectPlacements()
     local list = {}
@@ -90,7 +71,6 @@ local function collectPlacements()
         return list
     end
 
-    -- Only widgets in the layout's order are actually on the desktop.
     local placed = nil
     local order = noctalia.getSetting("desktop_widgets.widget_order")
     if type(order) == "table" and #order > 0 then
@@ -114,8 +94,6 @@ local function collectPlacements()
             if out then
                 local bw = if (w.box_width or 0) > 0 then w.box_width else DEFAULT_SIZE
                 local bh = if (w.box_height or 0) > 0 then w.box_height else DEFAULT_SIZE
-                -- Widget coordinates are stored against the output size at the
-                -- time of placement; rescale if the output changed since.
                 local sx = if (w.placement_width or 0) > 0 then out.width / w.placement_width else 1
                 local sy = if (w.placement_height or 0) > 0 then out.height / w.placement_height else 1
                 local cx = (w.cx or out.width / 2) * sx
@@ -137,12 +115,6 @@ local function collectPlacements()
     return list
 end
 
--- ── Colours ─────────────────────────────────────────────────────────────
-
--- Theme palette as { primary = "#..", secondary = "#..", tertiary = "#.." }.
--- Newer Noctalia exposes it directly; older releases (5.0 betas) don't, so the
--- palette is regenerated from the wallpaper with Noctalia's own generator,
--- using the same scheme and mode as the shell.
 local function themeColors(outputName: string?)
     if noctalia.getColor then
         return {
@@ -203,8 +175,6 @@ local function resolveColors(outputName: string?)
     return color, glow
 end
 
--- ── Config ──────────────────────────────────────────────────────────────
-
 local function buildConfig(placements)
     local color, glow = resolveColors(placements[1] and placements[1].output)
     return {
@@ -238,7 +208,6 @@ local function writeConfig(cfg)
     local text = noctalia.json.encode(cfg, true)
     if text ~= lastWritten then
         noctalia.mkdirAll(dataDir)
-        -- Write then rename, so the renderer never reads half a file.
         local tmp = `{CONFIG}.tmp`
         if noctalia.writeFile(tmp, text) and noctalia.renameFile(tmp, CONFIG) then
             lastWritten = text
@@ -252,8 +221,6 @@ local function removeConfig()
         lastWritten = nil
     end
 end
-
--- ── Status ──────────────────────────────────────────────────────────────
 
 local function publish(count: number, binary: string?, hasCava: boolean)
     local problem = nil
@@ -279,8 +246,6 @@ local function publish(count: number, binary: string?, hasCava: boolean)
         noctalia.state.set("status", status)
     end
 end
-
--- ── Process management ──────────────────────────────────────────────────
 
 local function recentLaunches(): number
     local now = noctalia.nowMs()
@@ -334,14 +299,11 @@ local function sync()
             ensureRunning(binary)
         end
     else
-        -- The renderer exits by itself within a second of the config going away.
         removeConfig()
         running = false
     end
     publish(#placements, binary, hasCava)
 end
-
--- ── Actions ─────────────────────────────────────────────────────────────
 
 local function setEnabled(on: boolean)
     enabled = on
@@ -380,8 +342,6 @@ noctalia.state.watch("command", function(value)
     end
 end)
 
--- `noctalia msg plugin tausif/ncs-visualizer:service all toggle` (or on / off),
--- for compositor keybinds.
 function onIpc(event, payload)
     if event == "request" and type(payload) == "string" and payload ~= "" then
         local ok, decoded = pcall(noctalia.json.decode, payload)
@@ -394,7 +354,6 @@ function onIpc(event, payload)
 end
 
 function onConfigChanged()
-    -- New settings deserve a fresh try after a crash loop.
     crashed = false
     launches = {}
     sync()

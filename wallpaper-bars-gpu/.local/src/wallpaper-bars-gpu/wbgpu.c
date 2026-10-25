@@ -1,19 +1,4 @@
-/*
- * wallpaper-bars-gpu -- cava spectrum bars drawn on the GPU.
- *
- * A wlr-layer-shell surface per output, fullscreen, on the Bottom layer, that
- * runs ONE fullscreen fragment shader: bar geometry, rounded corners, glow
- * falloff and the wallpaper-sampled colours are all computed per pixel on the
- * GPU. The CPU only feeds 128 smoothed levels and, when the wallpaper changes,
- * one texture upload.
- *
- * Replaces the Noctalia desktop widget `computing/wallpaper-bars`, whose ~1400
- * translucent ui.box nodes per output cost cairo ~1 core of CPU raster time.
- *
- *   cava (raw 0..1000 ascii) --> levels texture --> shader --> layer surface
- *
- * Build: make        Install: make install
- */
+
 #define _GNU_SOURCE
 #include <stdio.h>
 #include <stdarg.h>
@@ -42,20 +27,18 @@
 #define WALL_TEX_W 1024
 #define WALL_TEX_H 576
 
-/* ------------------------------------------------------------------ config */
-
 static int    cfg_bands      = 128;
-static int    cfg_feed       = 128;    /* bands cava delivers                */
+static int    cfg_feed       = 128;
 static double cfg_gap        = 1.5;
 static double cfg_radius     = 4.0;
-static double cfg_opacity    = 0.22;   /* widget bar_opacity                 */
-static double cfg_blur       = 1.0;    /* widget blur -> halo layer count    */
-static double cfg_smooth_ms  = 165.0;  /* widget smoothing                   */
+static double cfg_opacity    = 0.22;
+static double cfg_blur       = 1.0;
+static double cfg_smooth_ms  = 165.0;
 static double cfg_idle_ms    = 6000.0;
-static double cfg_sat        = 2.8;    /* widget saturation                  */
-static double cfg_lift       = 0.18;   /* widget brightness                  */
-static double cfg_minlight   = 0.40;   /* widget min_light                   */
-static char   cfg_settings[PATH_MAX];  /* noctalia settings.toml (per-output bands) */
+static double cfg_sat        = 2.8;
+static double cfg_lift       = 0.18;
+static double cfg_minlight   = 0.40;
+static char   cfg_settings[PATH_MAX];
 static char   cfg_cava_conf[PATH_MAX];
 static char   cfg_wallpaper[PATH_MAX];
 static char   cfg_only_output[64];
@@ -78,8 +61,6 @@ static double now_ms(void)
     clock_gettime(CLOCK_MONOTONIC, &ts);
     return ts.tv_sec * 1000.0 + ts.tv_nsec / 1e6;
 }
-
-/* -------------------------------------------------------------- wayland */
 
 static struct wl_display *wl_dpy;
 static struct wl_registry *wl_reg;
@@ -105,15 +86,13 @@ struct output {
     struct wl_egl_window *win;
     EGLSurface esurf;
     int configured;
-    int bands;              /* 0 = unknown, resolved at render time */
+    int bands;
     struct output *next;
 };
 
 static struct output *outputs;
 
-static int bands_for_output(const char *name);   /* settings.toml, defined below */
-
-/* --------------------------------------------------------------- shaders */
+static int bands_for_output(const char *name);
 
 static const char *VS_SRC =
     "#version 300 es\n"
@@ -126,14 +105,14 @@ static const char *FS_SRC =
     "#version 300 es\n"
     "precision highp float;\n"
     "uniform vec2  u_res;\n"
-    "uniform sampler2D u_levels;   // feed-width levels (r = 0..1)\n"
+    "uniform sampler2D u_levels;\n"
     "uniform sampler2D u_wall;\n"
-    "uniform int   u_n;            // bands on THIS output (widget setting)\n"
-    "uniform int   u_feed;         // bands in the cava feed\n"
+    "uniform int   u_n;\n"
+    "uniform int   u_feed;\n"
     "uniform float u_gap;\n"
     "uniform float u_radius;\n"
-    "uniform float u_blur;         // widget \"blur\" 0..1 -> halo layers\n"
-    "uniform float u_opacity;      // widget bar_opacity\n"
+    "uniform float u_blur;\n"
+    "uniform float u_opacity;\n"
     "uniform float u_sat;\n"
     "uniform float u_lift;\n"
     "uniform float u_minlight;\n"
@@ -306,8 +285,6 @@ static void gpu_init(void)
     ge_ready = 1;
 }
 
-/* ------------------------------------------------------------- wallpaper */
-
 static time_t wall_mtime = -1;
 
 static int read_fd_all(int fd, unsigned char **out, size_t *outlen)
@@ -338,9 +315,6 @@ static int read_fd_all(int fd, unsigned char **out, size_t *outlen)
     return 0;
 }
 
-/* Decode the wallpaper to a small RGBA buffer with magick (a dependency the
- * old plugin already required) and upload it. Sampled in the shader, so the
- * on-GPU texture can be small without visible loss. */
 static void wallpaper_reload(void)
 {
     char resolved[PATH_MAX];
@@ -391,8 +365,6 @@ static void wallpaper_reload(void)
     logmsg("wallpaper loaded: %s", resolved);
 }
 
-/* ------------------------------------------------------------------ cava */
-
 static int cava_fd = -1;
 static pid_t cava_pid = -1;
 
@@ -424,7 +396,6 @@ static void cava_spawn(void)
 static float targets[1024];
 static float levels[1024];
 
-/* raw ascii cava: "12;34;56;...;\n", values 0..1000 */
 static void cava_parse_line(char *line, int len)
 {
     int got = 0;
@@ -450,7 +421,7 @@ static void cava_parse_line(char *line, int len)
     }
     if (got == 0)
         return;
-    /* resample the feed onto our band count (feed == bands is the norm) */
+
     if (got != cfg_bands) {
         float src[1024];
         memcpy(src, targets, sizeof(float) * (size_t)got);
@@ -466,7 +437,6 @@ static void cava_parse_line(char *line, int len)
 static char cava_buf[1 << 16];
 static size_t cava_buflen;
 
-/* returns number of complete lines consumed */
 static int cava_pump(void)
 {
     int lines = 0;
@@ -477,7 +447,7 @@ static int cava_pump(void)
         if (n < 0) {
             if (errno == EINTR)
                 continue;
-            break; /* EAGAIN: nothing more pending */
+            break;
         }
         if (n == 0)
             break;
@@ -498,8 +468,6 @@ static int cava_pump(void)
     }
     return lines;
 }
-
-/* --------------------------------------------------------------- surfaces */
 
 static void render(struct output *o);
 
@@ -556,7 +524,7 @@ static void create_surface(struct output *o)
     o->surf = wl_compositor_create_surface(wl_comp);
     if (!o->surf)
         return;
-    /* click-through: an empty input region means the layer never eats input */
+
     struct wl_region *empty = wl_compositor_create_region(wl_comp);
     wl_surface_set_input_region(o->surf, empty);
     wl_region_destroy(empty);
@@ -574,8 +542,6 @@ static void create_surface(struct output *o)
     zwlr_layer_surface_v1_add_listener(o->ls, &ls_listener, o);
     wl_surface_commit(o->surf);
 }
-
-/* ------------------------------------------------------------------ input */
 
 static void out_geometry(void *data, struct wl_output *wl, int32_t x, int32_t y,
                          int32_t pw, int32_t ph, int32_t subpixel,
@@ -645,8 +611,6 @@ static const struct wl_registry_listener reg_listener = {
     .global_remove = reg_remove,
 };
 
-/* ------------------------------------------------------------------- draw */
-
 static float fade = 1.0f;
 static double idle_acc, fade_target = 1.0;
 
@@ -670,7 +634,7 @@ static void render(struct output *o)
     glClear(GL_COLOR_BUFFER_BIT);
 
     glEnable(GL_BLEND);
-    glBlendFunc(GL_ONE, GL_ONE_MINUS_SRC_ALPHA); /* premultiplied */
+    glBlendFunc(GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
     glUseProgram(prog);
     glBindVertexArray(vao);
 
@@ -711,9 +675,9 @@ static void render(struct output *o)
         }
         logmsg("%s: selftest row A>25 -> %d bands, widest run %d px, width %d",
                o->name, runs, maxrun, w);
-        /* glow / tip profile at the middle of the widest band */
+
         int nb = o->bands > 0 ? o->bands : cfg_bands;
-        int cx = (int)((nb / 2 + 0.5) * (double)w / nb);   /* centre of one bar, not a gap */
+        int cx = (int)((nb / 2 + 0.5) * (double)w / nb);
         for (int y = 0; y < h; y += h / 12) {
             unsigned char px[4] = {0};
             glReadPixels(cx, y, 1, 1, GL_RGBA, GL_UNSIGNED_BYTE, px);
@@ -736,8 +700,6 @@ static void render_all(void)
     for (struct output *o = outputs; o; o = o->next)
         render(o);
 }
-
-/* ------------------------------------------------------------------- main */
 
 static void usage(const char *argv0)
 {
@@ -810,10 +772,6 @@ static void parse_args(int argc, char **argv)
     if (cfg_bands > 1024) cfg_bands = 1024;
 }
 
-/* The Noctalia widget took its look from settings.toml: plugin-level bar_opacity,
- * saturation and smoothing, plus a per-instance band count (this box runs 64 bands
- * on the TV and 128 on the laptop panel). Read the same values so the GPU renderer
- * draws what the widget drew instead of guessing. */
 static char map_out[8][64];
 static int  map_bands[8];
 static int  map_n;
@@ -981,10 +939,9 @@ int main(int argc, char **argv)
     }
 
     egl_boot();
-    /* one context is enough: each surface is made current for its own draw */
+
     if (!eglMakeCurrent(egl_dpy, EGL_NO_SURFACE, EGL_NO_SURFACE, egl_ctx)) {
-        /* no surfaceless support: park the context on a 1x1 pbuffer so
-         * textures can be created and uploaded before any surface exists */
+
         const EGLint pb[] = { EGL_WIDTH, 1, EGL_HEIGHT, 1, EGL_NONE };
         EGLSurface tmp = eglCreatePbufferSurface(egl_dpy, egl_cfg, pb);
         if (tmp == EGL_NO_SURFACE || !eglMakeCurrent(egl_dpy, tmp, tmp, egl_ctx)) {
@@ -1000,7 +957,6 @@ int main(int argc, char **argv)
         create_surface(o);
     wl_display_roundtrip(wl_dpy);
 
-    /* Fallback: outputs may have been announced after our first roundtrip. */
     if (!outputs) {
         logmsg("no wl_output yet, retrying");
         wl_display_roundtrip(wl_dpy);
@@ -1017,7 +973,7 @@ int main(int argc, char **argv)
 
     while (!quit) {
         double t0 = now_ms();
-        double timeout = 1000; /* idle wake for the wallpaper check */
+        double timeout = 1000;
         if (fading)
             timeout = 16;
         if (cfg_demo) {
@@ -1070,7 +1026,6 @@ int main(int argc, char **argv)
         if (dt > 250) dt = 250;
         last = t1;
 
-        /* smoothing + fade run on every frame we draw */
         if (dirty || fading) {
             float k = cfg_smooth_ms > 0 ? (float)(1.0 - exp(-dt / cfg_smooth_ms)) : 1.f;
             float peak = 0.f;
@@ -1093,9 +1048,6 @@ int main(int argc, char **argv)
             else if (fade > 0.996f)
                 fade = 1.f;
 
-            /* keep ticking only while there is something to see: once fully
-             * faded and silent, skip the draw entirely (cava keeps streaming
-             * zero lines, which would otherwise force a frame every tick). */
             if (fade > 0.0f)
                 render_all();
             fading = (fade_target == 0.0 && fade > 0.0);

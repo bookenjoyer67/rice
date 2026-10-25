@@ -1,12 +1,3 @@
-// Burn Effect with Ashes - Windows burn with 8 random ember colors, floating ash, and glowing sparks
-//
-// Adjustable parameters:
-// - uv * 8.0: Edge roughness - higher = finer burn pattern
-// - threshold * 0.8: Burn reach - how far burn extends into window
-// - 0.08: Glow width - width of ember glow line
-// - 150.0 in ash_particle: Ash size - higher = smaller particles
-// - 280.0 in ember_spark: Spark size - higher = smaller sparks
-// - Loop counts (7.0, 8.0): Particle layers - more = more particles (performance impact)
 
 animations {
     window-open {

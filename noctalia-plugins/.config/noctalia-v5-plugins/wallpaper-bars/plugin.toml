@@ -1,16 +1,3 @@
-# Wallpaper Bars - desktop audio visualizer that reads the wallpaper.
-#
-# The service runs cava (raw ASCII spectrum) and samples the wallpaper image
-# with ImageMagick: it crops the exact region that sits behind this widget,
-# then averages it into a cols x rows colour grid. The widget draws one bar per
-# spectrum band, coloured from the grid at the height the bar currently
-# reaches - so every bar takes the colour of the picture behind it, and shifts
-# through the image as the music moves.
-#
-#   [[service]]         feeds cava levels + the colour grid into noctalia.state
-#   [[desktop_widget]]  draws the bars (frame-ticked, per-band colours)
-#
-# Re-samples on its own when the wallpaper or the widget's box changes.
 id = "computing/wallpaper-bars"
 name = "Wallpaper Bars"
 version = "1.0.0"
@@ -171,8 +158,6 @@ entry = "service.luau"
 id = "bars"
 entry = "widget.luau"
 
-# Per-instance: the canvas must match the tile's box on its own output, and
-# `monitor` picks that output's wallpaper grid (empty = match by canvas size).
 [[desktop_widget.setting]]
 key = "width"
 type = "int"

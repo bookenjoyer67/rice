@@ -1,13 +1,6 @@
 #!/usr/bin/env bash
-# Search highlighted text in Brave Search, opened as a NEW window on the
-# currently-active workspace. Works on both niri and Hyprland.
-#   * Reads the Wayland PRIMARY selection (what you highlighted) via wl-paste,
-#     falling back to the clipboard if nothing is highlighted.
-#   * Forces a brand-new browser window (--new-window), then moves it onto the
-#     focused workspace and focuses it.
 set -euo pipefail
 
-# --- 1. Read highlighted (primary selection) text; fall back to clipboard. ---
 q="$(wl-paste --primary --no-newline 2>/dev/null || true)"
 if [ -z "$q" ]; then
     q="$(wl-paste --no-newline 2>/dev/null || true)"
@@ -17,7 +10,6 @@ if [ -z "$q" ]; then
     exit 0   # nothing selected/copied — do nothing
 fi
 
-# --- 2. URL-encode the query. ---
 if command -v jq >/dev/null 2>&1; then
     enc="$(printf '%s' "$q" | jq -sRr @uri)"
 else
@@ -25,7 +17,6 @@ else
 fi
 url="https://search.brave.com/search?q=$enc"
 
-# --- 3. Detect compositor. ---
 comp="unknown"
 if [ -n "${NIRI_SOCKET:-}" ] && niri msg workspaces >/dev/null 2>&1; then
     comp="niri"
@@ -33,7 +24,6 @@ elif command -v hyprctl >/dev/null 2>&1 && hyprctl activeworkspace >/dev/null 2>
     comp="hyprland"
 fi
 
-# Dry-run for testing without launching a browser.
 if [ "${SEARCH_DRY_RUN:-0}" = "1" ]; then
     printf 'compositor=%s\nurl=%s\n' "$comp" "$url"
     exit 0
@@ -92,7 +82,6 @@ case "$comp" in
         fi
         ;;
     *)
-        # Unknown compositor — just open it on the focused workspace.
         "${launch[@]}" >/dev/null 2>&1 &
         ;;
 esac

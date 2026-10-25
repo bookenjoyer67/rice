@@ -47,7 +47,6 @@ local function dir_size(dir_path: string): number
 	return total
 end
 
--- Intentional downloads: explicit ⬇ saves + every track of fully-downloaded playlists
 local function get_intentional()
 	local intentional = {}
 	for vid in pairs(state.offline_meta or {}) do
@@ -68,8 +67,6 @@ end
 
 local Cache = {}
 
--- Audio is one shared dir, so its total size is split into downloads vs cached
--- using intentional saves as the partition.
 function Cache.fetch_stats()
 	state.refreshing_cache_stats = true
 	store.publish()
@@ -114,8 +111,6 @@ function Cache.fetch_stats()
 	end)
 end
 
--- rm target allowlist: the request channel is external input, so anything
--- outside these names is refused rather than interpolated.
 local ALLOWED_TARGETS = {
 	downloads = true,
 	cached_audio = true,

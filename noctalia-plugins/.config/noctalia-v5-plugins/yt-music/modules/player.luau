@@ -13,32 +13,16 @@ local publish = store.publish
 
 local stream_generation = 0
 
--- Original insertion order kept while shuffling so toggling shuffle OFF can
--- restore it. Module-local on purpose: never published to the UI snapshot or
--- saved into the session.
 local original_queue = nil
 
--- Last click wins: bumped on every explicit play request so stream-resolve
--- responses from earlier rapid clicks are recognised as stale and dropped
--- instead of hijacking playback when they finally arrive.
 local play_generation = 0
 local start_stream
 
--- Coalesced manual skips: rapid next/prev presses accumulate into
--- pending_steps and fire once the burst settles, so intermediate songs never
--- audibly start — only the final landing resolves and plays.
 local pending_steps = 0
 local skip_nonce = 0
 local firing_debounce = false
 local queue_skip -- forward: Player.next/prev coalesce through this, defined below
 
--- Last click wins, structurally: when a new intent supersedes a still-loading
--- one, the older yt-dlp stream-resolves are already useless (the generation
--- guard would drop their results) but still hold spawn slots the final song
--- needs. Kill them before spawning the new fetch. The pattern matches ONLY
--- stream resolves (-f bestaudio/best -g); audio downloads use -f bestaudio -o
--- and are untouched. The -[g] bracket form keeps pkill from matching its own
--- command line.
 local function kill_stale_resolves(done)
 	local scheduled = noctalia.runAsync("pkill -f 'bestaudio/best -[g]' 2>/dev/null; true", function()
 		if done then
@@ -70,8 +54,6 @@ local function player_set(item, stream_url)
 	state.player.likes = 0
 	state.search.pending = false
 
-	-- Stats responses can outlive the click that started them; drop any that
-	-- arrive after a newer play intent so old counts never flash on screen.
 	local gen = play_generation
 	if api and api.track_stats and item.id and item.id ~= "" then
 		api.track_stats(item.id, function(views, likes)
@@ -111,10 +93,6 @@ local function player_set(item, stream_url)
 			start_stream()
 		end
 	end, state.player.thumb_path) -- cached art -> mpris:artUrl via mpv-mpris
-	-- Speculative work happens only for settled playback: the song that
-	-- actually starts earns its next-track prefetch and queue thumbnails.
-	-- Skipped-over intents never get here, so rapid skipping spawns nothing
-	-- but one kill + one resolve per click.
 	if api and api.prefetch_queue then
 		api.prefetch_queue(state.player.queue, state.player.index)
 	elseif api and api.prefetch_track then
@@ -140,10 +118,6 @@ local function player_set(item, stream_url)
 	publish()
 end
 
--- Offline mode helpers: first index whose audio exists locally.
---   pick_playable_forward — start..end, no wrap (repeat off/one)
---   pick_playable_cycle   — full cycle incl. wrap (repeat all)
--- Return the index plus how many entries were skipped, or nil when none.
 local function pick_playable_forward(start_idx, queue)
 	for idx = start_idx, #queue do
 		local t = queue[idx]
@@ -172,9 +146,6 @@ function Player.play_index(index, queue)
 		return
 	end
 	if not firing_debounce then
-		-- Any direct play voids queued-up manual skips: they were aimed at
-		-- whatever was current before this intent (clicks, play-now, resume,
-		-- natural advance).
 		skip_nonce = skip_nonce + 1
 		pending_steps = 0
 	end
@@ -182,17 +153,10 @@ function Player.play_index(index, queue)
 		original_queue = nil
 	end
 
-	-- A new intent while the previous one is still loading supersedes it: the
-	-- older fetches are dead weight and the skipped songs earn no prefetch or
-	-- thumbnails — only the song we land on gets work done.
 	local superseding = (state.player.status == "loading")
-	-- Any new play intent invalidates every in-flight resolve before it.
 	play_generation = play_generation + 1
 	local gen = play_generation
 
-	-- When offline, silently jump past undownloaded entries (covers natural
-	-- advance, manual next/prev and clicks into partial playlists). Repeat
-	-- all may wrap to earlier tracks; any other mode stops at queue end.
 	local skipped_offline = 0
 	if not state.online and api and api.get_audio_cache_path then
 		local eff, skipped
@@ -223,9 +187,6 @@ function Player.play_index(index, queue)
 	state.player.index = index
 	local item = queue[index]
 	if not superseding then
-		-- Silence the outgoing track. Skipped when superseding: the previous
-		-- intent already sent exactly one of these, and piled-up delayed
-		-- copies are what used to pause the final song after it started.
 		mpv.send((noctalia.json.encode({ command = { "set_property", "pause", true } })))
 	end
 	state.player.id = item.id or ""
@@ -236,7 +197,6 @@ function Player.play_index(index, queue)
 		or (api and api.get_thumbnail_path and api.get_thumbnail_path(item.id, item.thumbnail_url, nil) or nil)
 	state.player.duration = tonumber(item.duration) or 0
 	state.player.position = 0
-	-- Clear previous song's stats at click time, not on resolve.
 	state.player.views = 0
 	state.player.likes = 0
 	state.player.status = "loading"
@@ -283,8 +243,6 @@ function Player.play_index(index, queue)
 	end
 
 	if superseding then
-		-- Newest intent's fetch spawns only after the stale ones are dead, so
-		-- a saturated pool can never refuse the song we actually land on.
 		kill_stale_resolves(function()
 			api.resolve_stream(item.id, on_resolved)
 		end)
@@ -295,8 +253,6 @@ end
 
 function Player.play(item)
 	local n = #state.player.queue
-	-- Rapid re-clicks while the tail entry is still loading swap it out
-	-- instead of stacking duplicates; last click always owns that slot.
 	if state.player.status == "loading" and n > 0 and state.player.index == n then
 		state.player.queue[n] = {
 			id = item.id,
@@ -366,9 +322,6 @@ function Player.add_to_queue(item)
 	end
 end
 
--- Play immediately while preserving the upcoming queue: the suggestion slots
--- in right after the current track and starts, so everything queued below
--- keeps its order.
 function Player.play_now(item)
 	if not item or not item.id or item.id == "" then
 		return
@@ -453,14 +406,9 @@ function Player.next(is_natural_end)
 		return
 	end
 
-	-- With shuffle on the queue is physically reordered by toggle_shuffle,
-	-- so a plain sequential advance IS the shuffled order.
 	queue_skip(1)
 end
 
--- Walk the accumulated manual steps in one go and resolve+play only the
--- landing: no intermediate player_set, so skipped-over songs (even cached
--- ones) never become audible.
 local function advance_steps()
 	local steps = pending_steps
 	pending_steps = 0
@@ -479,8 +427,6 @@ local function advance_steps()
 			if state.player.repeat_mode == "all" then
 				idx = 1
 			else
-				-- Past the end without repeat-all: stop, like a single
-				-- next at the tail would.
 				state.player.status = "stopped"
 				publish()
 				return
@@ -494,8 +440,6 @@ local function advance_steps()
 	firing_debounce = false
 end
 
--- Each press within the window replaces the previous timer; the burst fires
--- once quiet. Net-zero bursts (next then prev) stay put.
 queue_skip = function(dir)
 	pending_steps = pending_steps + dir
 	skip_nonce = skip_nonce + 1
@@ -507,8 +451,6 @@ queue_skip = function(dir)
 		advance_steps()
 	end, 2000)
 	if not scheduled then
-		-- No slot even for the timer: run the backlog now rather than
-		-- dropping the press.
 		advance_steps()
 	end
 end
@@ -576,8 +518,6 @@ function Player.toggle_shuffle()
 		for i, t in ipairs(q) do
 			original_queue[i] = t
 		end
-		-- Fisher-Yates on the upcoming region only; history above the current
-		-- track stays exactly as played.
 		local start = (state.player.index or 0) + 1
 		for i = #q, start + 1, -1 do
 			local j = math.random(start, i)
@@ -662,9 +602,6 @@ function Player.restore_session(sess)
 	end
 end
 
--- One push stream per mpv instance, launched when mpv_play reports READY.
--- Tracks a generation so lines from an old stream (mpv was killed mid switch,
--- socket lingers ~1s) are dropped the moment a newer stream takes over.
 local function handle_stream_line(line)
 	if not line or line == "" then
 		return
@@ -674,7 +611,6 @@ local function handle_stream_line(line)
 		return
 	end
 
-	-- Genuine failures only: a skip aborts with "stop", a natural end "eof".
 	if data.event ~= "property-change" then
 		if data.event == "end-file" and data.reason == "error" and state.player.status == "playing" then
 			log(
@@ -721,7 +657,6 @@ local function handle_stream_line(line)
 		return
 	end
 	if name == "playlist-pos" then
-		-- Dummy/URL/dummy: a live 0/2 move is a user skip (failures handled above).
 		local pos = tonumber(data.data)
 		if pos ~= 0 and pos ~= 2 then
 			return

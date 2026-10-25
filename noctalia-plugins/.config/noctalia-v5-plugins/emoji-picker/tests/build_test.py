@@ -21,12 +21,10 @@ from pathlib import Path
 
 DELIM = "===="
 
-
 def luau_string(s: str) -> str:
     if "]" + DELIM + "]" in s:
         raise ValueError(f"string contains the long-bracket delimiter: {s!r}")
     return f"[{DELIM}[{s}]{DELIM}]"
-
 
 def luau_entry(entry: dict) -> str:
     parts = [f"e={luau_string(entry['e'])}", f"n={luau_string(entry['n'])}",
@@ -39,7 +37,6 @@ def luau_entry(entry: dict) -> str:
         parts.append("s=1")
     return "{" + ",".join(parts) + "}"
 
-
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--dataset", default=str(Path(__file__).parent.parent / "assets" / "emoji.json"))
@@ -49,14 +46,9 @@ def main() -> None:
 
     dataset = json.loads(Path(args.dataset).read_text(encoding="utf-8"))
     picker_src = Path(args.picker).read_text(encoding="utf-8")
-    # The core is a require()-able module ending in `return M`; inlined into
-    # the test chunk that return would be illegal mid-file.
     picker_src = re.sub(r"\nreturn M\s*$", "\n", picker_src)
     harness = (Path(__file__).parent / "harness.luau").read_text(encoding="utf-8")
 
-    # Each entry shim must bind the width its [[panel]] manifest entry
-    # declares: the shim is the size signal, so a drift silently misfits
-    # the grid for that panel.
     plugin_dir = Path(__file__).parent.parent
     manifest = (plugin_dir / "plugin.toml").read_text(encoding="utf-8")
     for entry_id in ("wide", "desktop", "compact"):
@@ -80,7 +72,6 @@ def main() -> None:
 
     Path(args.out).write_text("".join(out), encoding="utf-8")
     print(f"{args.out}: {len(dataset)} entries")
-
 
 if __name__ == "__main__":
     main()

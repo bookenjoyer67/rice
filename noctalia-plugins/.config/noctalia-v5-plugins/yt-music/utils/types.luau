@@ -1,7 +1,3 @@
--- ----------------------------------------------------------------------------
--- Shared data shapes (mirrored from api.luau parsers + service.luau snapshot)
--- Fields the parsers always produce are required; conditional ones are '?'.
--- ----------------------------------------------------------------------------
 
 export type Track = {
 	id: string,
@@ -14,8 +10,6 @@ export type Track = {
 	thumb_path: string?,
 }
 
--- Library rows (browse.luau) carry count; search playlist rows carry artist.
--- Tracks are NOT nested on the playlist object; use playlist_page's result for those.
 export type Playlist = {
 	id: string,
 	title: string,
@@ -32,8 +26,6 @@ export type PlaylistPageResult = {
 	total_count: number?,
 }
 
--- Search results mix song rows (Track, no type) and playlist rows
--- (type = "playlist", matching Playlist with an explicit discriminator).
 export type SearchResult = Track | (Playlist & { type: string? })
 
 export type Player = {

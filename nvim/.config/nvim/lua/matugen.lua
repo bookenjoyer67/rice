@@ -1,8 +1,5 @@
  local M = {}
 
--- Applied on every wallpaper / palette change (noctalia regenerates this file
--- and pings nvim with SIGUSR1), so anything that must keep being true belongs
--- inside M.setup() -- not in a one-shot startup hook.
 function M.setup()
   require('base16-colorscheme').setup({
     base00 = '#271618',
@@ -27,10 +24,6 @@ function M.setup()
     vim.api.nvim_set_hl(0, group, opts)
   end
 
-  -- Strip the background off an already-defined group. base16-nvim paints
-  -- Normal and friends with a solid surface colour; a Lua colorscheme does not
-  -- fire the ColorScheme autocmd, so transparent plugins never re-clear them.
-  -- Doing it here means it also survives every palette re-apply.
   local clear_bg = function(group)
     local ok, hl = pcall(vim.api.nvim_get_hl, 0, { name = group, link = true })
     if not ok or type(hl) ~= 'table' or hl.link or next(hl) == nil then
@@ -52,18 +45,15 @@ function M.setup()
     clear_bg(group)
   end
 
-  -- Legible comments: base16 maps Comment to base03 (outline), which is dim.
   hi('Comment', { fg = '#b6afaf', italic = true })
   for _, group in ipairs({ '@comment', '@comment.documentation' }) do
     hi(group, { fg = '#b6afaf', italic = true })
   end
 
-  -- Selection still needs some tint, or it is invisible on a transparent bg.
   hi('PmenuSel', { fg = '#f3f2f2', bg = '#3b2124' })
   hi('PmenuThumb', { bg = '#3b2124' })
   hi('Visual', { bg = '#3b2124' })
 
-  -- telescope.nvim (titles keep a filled background on purpose -- they are chips)
   hi('TelescopeNormal',         { fg = '#f3f2f2' })
   hi('TelescopeBorder',         { fg = '#726263' })
   hi('TelescopePromptNormal',   { fg = '#f3f2f2' })
@@ -77,7 +67,6 @@ function M.setup()
   hi('TelescopeSelectionCaret', { fg = '#e46774',             bg = '#3b2124' })
   hi('TelescopeMatching',       { fg = '#e46774',             bold = true })
 
-  -- mini.pick
   hi('MiniPickNormal',         { fg = '#f3f2f2' })
   hi('MiniPickBorder',         { fg = '#726263' })
   hi('MiniPickPrompt',         { fg = '#f3f2f2' })
@@ -87,8 +76,6 @@ function M.setup()
   hi('MiniPickPromptCaret',    { fg = '#e46774',             bg = '#3b2124' })
   hi('MiniPickMatchRanges',    { fg = '#e46774',             bold = true })
 
-  -- Anything the previous colorscheme left behind (nvim-cmp / blink.cmp menus
-  -- are not defined by base16-nvim, so their old opaque fills survive).
   for name, hl in pairs(vim.api.nvim_get_hl(0, { link = true })) do
     if not hl.link and (name:match('^Cmp') or name:match('^BlinkCmp')) then
       hl.bg = (name:match('Selection$') or name:match('Thumb$'))
@@ -98,13 +85,9 @@ function M.setup()
     end
   end
 
-  -- Keep transparent.nvim (and any theme that honours this flag) in agreement.
   vim.g.transparent_enabled = true
 end
 
--- Register a signal handler for SIGUSR1 (matugen updates).
--- The handler re-requires this module, which re-runs the code below, so the
--- previous handle is stopped first; otherwise handlers double on every signal.
 if _G.__matugen_signal then
   _G.__matugen_signal:stop()
   _G.__matugen_signal:close()

@@ -1,11 +1,3 @@
-# Theme Refresh — one bar button that re-derives the rice palette from the
-# current wallpaper, for when Noctalia's async palette extraction lags behind
-# a wallpaper switch.
-#
-# The button runs ~/.config/noctalia/scripts/theme-refresh.sh, which re-runs
-# the palette half of ~/.config/niri/scripts/apply-wallpaper.sh (matugen for
-# the legacy palettes, then Noctalia wallpaper-set to re-extract the shell
-# palette and fire the eww / niri focus-ring template hooks).
 id = "computing/theme-refresh"
 name = "Theme Refresh"
 version = "1.0.0"

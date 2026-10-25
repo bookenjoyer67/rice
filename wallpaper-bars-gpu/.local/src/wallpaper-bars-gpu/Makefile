@@ -4,8 +4,6 @@ PKGS    := wayland-client wayland-egl egl glesv2
 CFLAGS  += $(shell pkg-config --cflags $(PKGS))
 LDLIBS  += $(shell pkg-config --libs $(PKGS)) -lm
 
-# wlr-layer-shell's get_popup references xdg_popup, so the generated protocol
-# code needs the xdg-shell interfaces linked in as well.
 XSDG_XML := /usr/share/wayland-protocols/stable/xdg-shell/xdg-shell.xml
 
 WLR_H := wlr-layer-shell-unstable-v1-client-protocol.h

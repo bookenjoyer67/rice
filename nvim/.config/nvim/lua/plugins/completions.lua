@@ -38,7 +38,6 @@ return {
       local cmp = require("cmp")
       require("luasnip.loaders.from_vscode").lazy_load()
 
-      -- LSP symbol icons for a clearer completion menu
       local kind_icons = {
         Text = "󰉿", Method = "󰆧", Function = "󰊕", Constructor = "",
         Field = "󰜢", Variable = "󰀫", Class = "󰠱", Interface = "",
@@ -59,7 +58,6 @@ return {
           completion = cmp.config.window.bordered(),
           documentation = cmp.config.window.bordered(),
         },
-        -- option 3: preselect best match so Enter just works
         preselect = cmp.PreselectMode.Item,
         completion = {
           completeopt = "menu,menuone,noinsert",
@@ -81,7 +79,6 @@ return {
           { name = "path" },
           { name = "git" },
         }),
-        -- option 3: LSP results outrank buffer/word matches
         sorting = {
           priority_weight = 2,
           comparators = {

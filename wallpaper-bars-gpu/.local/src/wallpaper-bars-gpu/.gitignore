@@ -1,4 +1,3 @@
-# build output + wayland-scanner generated protocol code
 wallpaper-bars-gpu
 *-client-protocol.h
 *-protocol.c

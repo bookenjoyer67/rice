@@ -179,9 +179,6 @@ function Auth.load_cached_cookies()
 	end, 8000)
 end
 
--- Dependency health check, run at boot before the browser list is shown.
--- Result lands in state.health as name -> {status, detail}; the auth views
--- render a warning card for anything not ok. Additive only: never blocks.
 function Auth.check_health()
 	state.checking_health = true
 	store.publish()
@@ -193,8 +190,6 @@ function Auth.check_health()
 			health[name] = { status = status, detail = detail }
 			table.insert(parts, name .. "=" .. status .. ":" .. detail)
 		end
-		-- Full check-by-check record (versions, netcat variant, stale
-		-- verdicts) lands in debug.log for remote diagnosis.
 		log("health check:")
 		for _, line in ipairs(parts) do
 			log("  " .. line)

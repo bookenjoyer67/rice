@@ -1,13 +1,5 @@
 --!nonstrict
 
--- Bar button: re-sync the rice palette with the current wallpaper.
--- Noctalia extracts the shell palette asynchronously; when that extraction
--- lands late the bar/panels/widgets keep the old wallpaper's colours. One
--- click re-runs the palette pipeline (see scripts/theme-refresh.sh).
---
--- Chromium only reads a theme extension at startup, so a running Brave stays
--- one palette behind. Left-click restarts Brave gracefully (session restored)
--- after the refresh; right-click only refreshes files/prefs.
 local SCRIPT = "bash \"$HOME/.config/noctalia/scripts/theme-refresh.sh\""
 local GLYPH = "refresh"
 
@@ -43,8 +35,6 @@ local function run(restart_brave)
       local err = result and tostring(result.stderr or "") or ""
       noctalia.notifyError("Theme refresh failed", err ~= "" and err or "Palette could not be re-synced.")
     else
-      -- The script's last stdout line is the human summary (Brave state
-      -- included); fall back to a generic message if it printed nothing.
       local summary = tostring(result.stdout or ""):match("([^\n]+)%s*$")
       if summary == nil or summary == "" then
         summary = "Palette re-synced from the current wallpaper."
@@ -61,12 +51,9 @@ local function run(restart_brave)
 end
 
 function onClick()
-  -- Chromium only reads a theme extension at startup, so a click restarts
-  -- Brave (with session restore) to actually apply the new palette.
   run(true)
 end
 
 function onRightClick()
-  -- Files/prefs only; Brave picks it up on its next manual start.
   run(false)
 end

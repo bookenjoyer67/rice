@@ -1,6 +1,4 @@
 --!nonstrict
--- Process Monitor — panel. Renders the process table + live system bars.
--- Sort/filter state lives here (a view concern); data comes from the service.
 
 local sortKey = "cpu"
 local sortDir = "desc"
@@ -8,62 +6,23 @@ local filter = ""
 local filterRev = 0 -- bumped to reseed the filter input so it can grab focus
 local focusFilterOnRender = false -- one-shot: focuses the filter on the next render
 
--- Per-column display unit: "pct" shows percent, "raw" shows the absolute
--- figure. Clicking the %CPU/%MEM header toggles it. MEM raw = RSS in MB; CPU
--- raw = cumulative CPU time (ps time=), a real number distinct from the %.
--- (ponytail: a per-interval CPU% needs two /proc/pid/stat samples and a diff,
--- too heavy for the update budget - the cumulative time is a free proxy.)
 local cpuUnit = "pct"
 local memUnit = "pct"
 
--- Cap how many rows we render so a single rebuild stays under the panel
--- update CPU budget. Rows are shown in sorted order, so the highest-sorting
--- processes are always visible. (200 rows * ~7 ui nodes blew the budget.)
 local MAX_ROWS = 80
 
--- Keyboard navigation state (btop-style): selectedIdx is the cursor position
--- in the currently visible (filtered/sorted/trimmed) list; 0 means nothing is
--- selected. Ctrl+D kills the selected process directly.
 local selectedIdx = 0
 
--- Windowed table rendering, edge-follow (htop/btop style). The panel renders
--- only a VIEW_CAP-row slice [winStart..winEnd] that fits the table viewport.
--- Rows ~30px (kill button height=26 + paddingV 2), so 10 fill the 660px panel
--- without clipping the last one (tuned so no dead gap sits below the list).
--- The cursor moves freely INSIDE the window; the window slides only when the
--- cursor pushes past an edge — down at the bottom edge, up at the top edge. So
--- scrolling back up from the bottom does not collapse the page: the rows above
--- (6,7,8,9) stay in view while the highlight climbs, and only reaching the
--- window's top edge starts following up again. There is no host "scroll to row
--- N" (API 21 only jumps to absolute bottom), so the slice is what the panel
--- draws and the window IS the visible page.
--- ponytail: VIEW_CAP is tuned to the panel's table height; could derive it from
--- a scroll fill-measure if the API ever exposes available height.
 local VIEW_CAP = 10
 local winStart = 1
 local winEnd = VIEW_CAP
 
--- Cheap fingerprint of everything the table shows, so the 1s tick only rebuilds
--- the heavy UI tree when the data actually changed. Rebuilding 200 rows every
--- second exceeded the panel update CPU budget; sampling the first SIG_SAMPLE
--- rows (ps output is pid-ordered) catches CPU/mem/rss movement without the cost.
 local SIG_SAMPLE = 40
 local lastSig = nil
 
--- Throttle data-driven renders. The service can sample faster than the panel can
--- rebuild its table, and every state.set fires a watch: at 250ms that was ~16
--- full rebuilds/sec of 80 rows, which blew the panel update CPU budget and got
--- the panel disabled. 2000ms bounds rebuilds to 1/2s, well under the budget.
--- The service samples stats every 1s and the process table every 2s, so a 2s
--- rebuild floor keeps the panel in lockstep with the table without re-rendering
--- the whole 80-row tree on every stats tick.
--- User interactions (toggle/filter/sort) still render() immediately; only the
--- data watches and the tick go through maybeRender().
 local lastRenderMs = 0
 local MIN_RENDER_MS = 2000
 
--- Kill column is a fixed width at the end of every row; all other columns are
--- flexGrow shares so the header and data rows always align and never overflow.
 local KILL_W = 30
 
 local function cfg(key)
@@ -74,10 +33,6 @@ local function st(key)
 	return noctalia.state.get(key)
 end
 
--- Draft value while the Refresh slider is being dragged; committed to state on
--- release (audio-switcher pattern). The service watches "refreshMs" and re-arms
--- its sampler timer, which is what actually changes the fetch speed. Declared
--- after cfg/st (Luau: forward refs to a later local compile as globals -> nil).
 local refreshDraft = nil
 local function refreshMs()
 	return tonumber(st("refreshMs") or cfg("refresh_interval")) or 1000
@@ -139,8 +94,6 @@ local function killPid(pid)
 	noctalia.runAsync(cmd .. " " .. pid)
 end
 
--- ── stats bars ──────────────────────────────────────────────────────────────
-
 local function statBar(label, glyph, pct, sub)
 	local pct0 = math.max(0, math.min(100, pct or 0))
 	return ui.row({ gap = 8, align = "center", flexGrow = 1 }, {
@@ -169,8 +122,6 @@ local function renderStats()
 		loadSub = string.format("%.2f %.2f %.2f", stats.loadAvg[1], stats.loadAvg[2], stats.loadAvg[3])
 	end
 
-	-- The render path must never throw: any stats field may be nil (seed
-	-- stats, or a sample that skipped a field), so guard every format arg.
 	local cpuSub = (cpu and cpu.usagePercent ~= nil) and string.format("%.0f%%", cpu.usagePercent) or "—"
 	local ramSub = "—"
 	if ram and ram.usedMb ~= nil and ram.totalMb ~= nil then
@@ -187,10 +138,6 @@ local function renderStats()
 	})
 end
 
--- ── process rows ────────────────────────────────────────────────────────────
-
--- Column layout, shared by header and data rows so they line up.
--- { flexGrow, textAlign } for each column; cmd is the wide flexible one.
 local COLS = {
 	{ 1.0, "end" }, -- PID
 	{ 1.0, "end" }, -- CPU
@@ -200,7 +147,6 @@ local COLS = {
 	{ 5.0, "start" }, -- COMMAND
 }
 
--- ui.select drives sorting. Order must match the settings.sort_by options.
 local SORT_KEYS = { "cpu", "mem", "pid", "cmd" }
 local function sortIndex(key)
 	for i, k in ipairs(SORT_KEYS) do
@@ -234,11 +180,6 @@ local function dataRow(p, idx)
 		{ stat, statColor },
 	}
 
-	-- Cursor highlight mirrors the signal picker: a translucent fill plus the
-	-- text flipped to primary. Zombie rows keep their error tint so the warning
-	-- survives selection. The row key bakes in the selection state so a moved
-	-- cursor rebuilds exactly the rows whose selection flipped -- a stable pid
-	-- key would leave the fill stuck on rows the cursor passed over.
 	local selected = idx == selectedIdx
 	local function cellColor(c)
 		local color = c[2] or "on_surface"
@@ -260,7 +201,6 @@ local function dataRow(p, idx)
 		}))
 	end
 
-	-- COMMAND column (flexGrow wide)
 	table.insert(children, ui.label({
 		text = trunc(p.cmd or "?", 80),
 		flexGrow = COLS[6][1],
@@ -270,8 +210,6 @@ local function dataRow(p, idx)
 		color = selected and "primary" or "on_surface",
 	}))
 
-	-- Kill button (fixed trailing width). Explicit height keeps the row short
-	-- enough that VIEW_CAP rows fit without clipping the last one.
 	table.insert(children, ui.button({
 		glyph = "square-x",
 		glyphSize = 14,
@@ -300,9 +238,6 @@ local function dataRow(p, idx)
 	}, children)
 end
 
--- Header: clickable cells use ui.row onClick (keeps layout, so the grid stays
--- aligned with the data rows). CPU/MEM headers toggle their column's display
--- unit (% vs actual). Built fresh on every render so titles track the mode.
 local HEADER_LABELS = { "panel.col.pid", "panel.col.cpu", "panel.col.mem", "panel.col.rss", "panel.col.stat", "panel.col.cmd" }
 local function buildHeader()
 	local children = {}
@@ -335,17 +270,10 @@ local function buildHeader()
 			children[#children + 1] = ui.label(label)
 		end
 	end
-	-- trailing spacer matching the kill column
 	children[#children + 1] = ui.spacer({ width = KILL_W })
 	return children
 end
 
--- ── main render ─────────────────────────────────────────────────────────────
-
--- The currently visible rows: filtered by `filter`, sorted by the active
--- column, capped at MAX_ROWS. Shared by render() and the keyboard handlers so
--- onKey resolves the cursor position against the exact same list the panel
--- draws (never trust an index computed from a stale render).
 local function visibleList()
 	local procs = st("procs") or {}
 	local f = filter:lower()
@@ -384,7 +312,6 @@ local function visibleList()
 		return av > bv
 	end)
 
-	-- Bound the rendered rows so a 500-process box stays responsive.
 	if #list > MAX_ROWS then
 		local shown = {}
 		for i = 1, MAX_ROWS do
@@ -395,27 +322,18 @@ local function visibleList()
 	return list, #list
 end
 
--- Keep the window [winStart..winEnd] covering the cursor and inside the list.
--- Called from render() after the cursor is clamped, so it also heals the window
--- when the list shrank (filter/sort/data) and left the cursor or window out of
--- bounds. The lazy up-follow during navigation lives in onKey, not here (this
--- only heals shrink/regrow).
 local function clampWindow(n)
 	if n == 0 then
 		winStart, winEnd = 1, 0
 		return
 	end
-	-- Cursor below the window (list regrew or follow-down persisted): extend.
 	if selectedIdx > winEnd then
 		winEnd = selectedIdx
 		winStart = math.max(1, winEnd - VIEW_CAP + 1)
-		-- Cursor above the window: the list shrank (a filter) or re-sorted and left the
-	-- cursor outside. Flatten back to the top page — cleared search shows row 1.
 	elseif selectedIdx < winStart then
 		winStart = 1
 		winEnd = math.min(VIEW_CAP, n)
 	end
-	-- Never let the window extend past the list nor below row 1.
 	if winEnd > n then
 		winEnd = n
 		winStart = math.max(1, winEnd - VIEW_CAP + 1)
@@ -423,10 +341,6 @@ local function clampWindow(n)
 	if winStart < 1 then
 		winStart = 1
 	end
-	-- Re-expand a below-capacity window to a full page. Only fires when the list
-	-- shrank (filter) then regrew: otherwise the window would stay a few rows wide
-	-- and grow one row per Down press. Filling back to VIEW_CAP makes a cleared
-	-- search show the whole page again. No-op during normal navigation.
 	if n >= VIEW_CAP and winEnd - winStart + 1 < VIEW_CAP then
 		winEnd = math.min(winStart + VIEW_CAP - 1, n)
 	end
@@ -437,8 +351,6 @@ function render()
 	focusFilterOnRender = false
 
 	local shown, totalCount = visibleList()
-	-- Keep the cursor inside the visible list. A shrunk list (filter/sort/data
-	-- change) clamps up; an empty list clears the cursor.
 	if #shown == 0 then
 		selectedIdx = 0
 	elseif selectedIdx > #shown then
@@ -449,14 +361,7 @@ function render()
 
 	local body
 	if #shown == 0 then
-		-- Keep the body a ui.scroll in BOTH states so the flexGrow container keeps
-		-- a stable height. Rendering a bare ui.row here (and switching back to a
-		-- scroll once results return) left the scroll container stuck short, which
-		-- clipped the bottom of the list after a 0-result search.
 		winStart, winEnd = 1, 0
-		-- Same stable key as the results scroll so the UI tree reconciles this as
-		-- one persistent scroll node across the 0-result <-> results transition,
-		-- keeping the flexGrow viewport height stable (avoids bottom clipping).
 		body = ui.scroll({ key = "proc-list", flexGrow = 1 }, {
 			ui.row({ align = "center", justify = "center", flexGrow = 1 }, {
 				ui.label({ text = tr("panel.no_processes"), color = "on_surface_variant" }),
@@ -545,9 +450,6 @@ function render()
 		lastSig = signature()
 	end
 
--- Data-driven render: only rebuild when the visible data actually changed AND
--- enough time has passed since the last rebuild. Defined after render/signature
--- (Luau: forward refs to a later local compile as globals -> nil).
 local function maybeRender()
 	local now = noctalia.nowMs()
 	if now - lastRenderMs < MIN_RENDER_MS then
@@ -564,18 +466,10 @@ noctalia.state.watch("stats", maybeRender)
 noctalia.state.watch("refreshedAtMs", maybeRender)
 noctalia.state.watch("err", maybeRender)
 noctalia.state.watch("refreshMs", function()
-	-- Track the fetch speed on the panel's own tick so the table stays live when
-	-- the user drops the interval below the 1s second-tick floor.
 	noctalia.setUpdateInterval(refreshMs())
 	render()
 end)
 
--- Periodic re-render on the panel tick (anilist/nix-monitor pattern). Belt and
--- suspenders on top of state.watch: even if a cross-entry watch is missed in
--- some shell versions, the list refreshes on its own. Track the service refresh
--- interval so the panel keeps up when the user drops it for more real-time
--- updates. setWantsSecondTicks is safe at this API level (9router/mawaqit use it
--- at plugin_api 3).
 noctalia.setUpdateInterval(refreshMs())
 panel.setWantsSecondTicks(true)
 
@@ -583,20 +477,6 @@ function update()
 	maybeRender()
 end
 
--- Keyboard control (btop-style). Chords must be listed in the panel's
--- `capture_keys` in plugin.toml, otherwise onKey never fires.
---
--- List mode: up/down move the cursor, Ctrl+D opens the signal picker for the
--- selected process, Ctrl+F focuses the filter box. Menu mode: up/down move the
--- signal highlight, Return sends it, Ctrl+D or Esc closes the menu. Ctrl-modifier
--- chords are used (not bare letters) so they never collide with the filter
--- input's text keys.
---
--- Keyboard chords. The runtime delivers chords as clean down/up pairs and
--- does not tag auto-repeat events, so holding a chord fires repeated presses.
--- The keyHeld guard (release-based, no time gate) blocks those repeats until
--- the release arrives; genuine taps clear on release, so they stay instant.
--- The short TTL only covers a rare missed release, never a tap.
 local keyHeld = {}
 local KEY_HELD_TTL_MS = 150
 local function keyFresh(chord)
@@ -614,8 +494,6 @@ function onKey(chord, pressed)
 		keyHeld[chord] = nil
 		return
 	end
-	-- Arrow keys repeat freely (holding Down scrolls the table / menu); the
-	-- guard only covers action chords where an auto-repeat would flip state.
 	if chord ~= "up" and chord ~= "down" and not keyFresh(chord) then
 		return
 	end
@@ -625,18 +503,12 @@ function onKey(chord, pressed)
 		if #list > 0 then
 			if chord == "down" then
 				selectedIdx = math.min(#list, selectedIdx + 1)
-				-- Cursor pushed past the bottom edge: extend the window one row and
-				-- slide its top so the new row is revealed below the cursor.
 				if selectedIdx > winEnd then
 					winEnd = selectedIdx
 					winStart = math.max(1, winEnd - VIEW_CAP + 1)
 				end
 			else
 				selectedIdx = math.max(1, selectedIdx - 1)
-				-- Cursor rose past the top edge: only now follow up — slide the window's
-				-- top to the cursor and refill down. Rows inside the window (6,7,8,9
-				-- while stepping down from 10) never shift the window; reaching below the
-				-- top edge (5) is what starts scrolling up again.
 				if selectedIdx < winStart then
 					winStart = selectedIdx
 					winEnd = math.min(winStart + VIEW_CAP - 1, #list)
@@ -648,8 +520,6 @@ function onKey(chord, pressed)
 	end
 
 	if chord == "ctrl+d" then
-		-- Kill the selected process directly (same configured kill_command the
-		-- row's ✕ button runs). No confirmation, matching the ✕ button.
 		local list = visibleList()
 		local p = list[selectedIdx]
 		if p then
@@ -666,7 +536,6 @@ function onKey(chord, pressed)
 	end
 
 	if chord == "escape" then
-		-- Swallow Escape so it never closes the whole panel.
 		return
 	end
 end
@@ -675,9 +544,6 @@ function onOpen(_context)
 	sortKey = cfg("sort_by") or "cpu"
 	sortDir = "desc"
 	filter = ""
-	-- No auto-focus on the filter: the panel opens in list mode so the arrow
-	-- keys and Ctrl+D work immediately (btop-style). Press Ctrl+F to start
-	-- typing a filter; the box is focused then.
 	selectedIdx = 0
 	winStart = 1
 	winEnd = VIEW_CAP

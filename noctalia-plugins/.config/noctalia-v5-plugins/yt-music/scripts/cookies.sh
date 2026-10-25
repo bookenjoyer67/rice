@@ -1,5 +1,4 @@
 #!/usr/bin/env bash
-# Invoked via:  bash scripts/cookies.sh <fn> <args...>
 
 open_browser() {   # $1=browser id
   local b="$1"
@@ -20,7 +19,6 @@ open_browser() {   # $1=browser id
     if [ "$b" = "firefox" ] || [ "$b" = "zen" ]; then
       "$B" "https://music.youtube.com" >/dev/null 2>&1 &
     else
-      # Clean up lingering processes and locks to ensure port 9222 binds
       pkill -9 -f "yt-music/profiles/$b" 2>/dev/null || true
       rm -rf "$cache_dir" 2>/dev/null
       mkdir -p "$cache_dir"
@@ -106,7 +104,6 @@ extract_cookies() {   # $1=browser id
   if [ "$cdp_done" -eq 1 ]; then
     cp "$RAW" "$OUT"
     LOG="CDP extraction successful via port 9222"
-    # Close debug browser instance and clean up its profile directory
     pkill -9 -f "yt-music/profiles/$browser" 2>/dev/null || true
     rm -rf "${XDG_CACHE_HOME:-$HOME/.cache}/yt-music/profiles/$browser" 2>/dev/null
   else

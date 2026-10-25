@@ -1,20 +1,4 @@
 #!/usr/bin/env bash
-# Lock the session with swaylock: no input field, the ring IS the feedback.
-#
-# The look is a BAKED backdrop, not swaylock's own effects: make_backdrop.py grades
-# the current wallpaper (blur, desaturate, palette tint, accent bloom, vignette) and
-# draws the indicator's glow plus the dark disc behind the clock, so swaylock only
-# strokes the ring and draws the time. Backdrops are per output (aspect safe) and
-# cached in ~/.cache/lockscreen, so locking is instant after the first run and after
-# every wallpaper change (apply-wallpaper.sh refreshes them).
-#
-# Typing lights ring segments (key-hl), backspace lights them in the second accent,
-# a wrong guess turns the ring red, caps lock tints it, failed attempts and the
-# keyboard layout are printed in the ring.
-#
-# LOCK_DRY=1 / LOCK_NUL=1 -> print the argv instead of locking (tests, preview harness)
-# LOCK_FORCE=1            -> regenerate the cached backdrops even if fresh
-# LOCK_RING_R / LOCK_FONT -> override geometry / typeface
 
 set -euo pipefail
 
@@ -26,8 +10,6 @@ FONT="${LOCK_FONT:-DejaVu Serif}"
 
 mkdir -p "$CACHE"
 
-# Palette anchors are quoted 8-digit rrggbbaa values; fall back to the "divine
-# machinery" pink/gold scheme if matugen has not run yet.
 get_colour() {
     local key="$1" fallback="$2" val=""
     if [ -r "$PALETTE" ]; then
@@ -52,10 +34,8 @@ if [ -z "$WALL_REAL" ] || [ ! -f "$WALL_REAL" ]; then
     WALL_REAL=""
 fi
 
-# Cache key: wallpaper identity + ring radius.
 KEY="$(printf '%s' "${WALL_REAL}:$(stat -c '%s-%Y' "$WALL_REAL" 2>/dev/null):${RING_R}" | md5sum | cut -c1-12)"
 
-# One backdrop per enabled output; swaylock takes --image <output>:<path>.
 IMAGE_ARGS=()
 while IFS=$'\t' read -r name ow oh; do
     if [ -z "${name:-}" ]; then
@@ -75,7 +55,6 @@ done < <(niri msg --json outputs 2>/dev/null |
          jq -r 'to_entries[] | select(.value.logical != null) |
                 "\(.key)\t\(.value.logical.width|floor)\t\(.value.logical.height|floor)"' 2>/dev/null)
 
-# Fallback: no compositor info (niri not answering) -> let swaylock grade one image.
 if [ ${#IMAGE_ARGS[@]} -eq 0 ]; then
     if [ -n "$WALL_REAL" ]; then
         IMAGE_ARGS=(--image "$WALL_REAL" --scaling fill --effect-blur 14x4)
@@ -134,5 +113,4 @@ if [ "${LOCK_DRY:-0}" = "1" ]; then
     exit 0
 fi
 
-# -f daemonizes so a niri spawn / systemd oneshot returns immediately.
 exec swaylock -f "${ARGS[@]}"

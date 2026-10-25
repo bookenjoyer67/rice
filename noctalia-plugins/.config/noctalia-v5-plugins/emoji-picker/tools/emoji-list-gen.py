@@ -43,10 +43,8 @@ import json
 import sys
 import xml.etree.ElementTree as ET
 
-# U+FE0F VARIATION SELECTOR-16 (written as an escape: the literal is invisible)
 VS16 = "\ufe0f"
 
-# emoji-test.txt "# group:" header -> category id, in browse order.
 GROUPS = {
     "Smileys & Emotion": "smileys",
     "People & Body": "smileys",  # classic "Smileys & People" section
@@ -59,19 +57,7 @@ GROUPS = {
     "Flags": "flags",
 }
 
-# ── Unicode symbol set ──────────────────────────────────────────────────
-# Curated in BROWSE order (the order tiles appear in the "chars" category).
-# Tuple per character: (codepoint, name, aliases, keywords)
-#   name    — canonical name; None = derive from the formal Unicode name
-#             (lowercased, hyphens turned into spaces)
-#   aliases — name-class search terms (what people actually type); the
-#             formal Unicode name is appended automatically, and every
-#             multi-word name/alias also gets its "hyphen-joined" and
-#             "squashed" variants ("plus minus" also matches "plus-minus"
-#             and "plusminus")
-#   keywords — weaker match class, for fuzzy long-tail terms only
 SYMBOLS = [
-    # ── currency ──
     ("0024", "dollar", ["usd", "dollars"], ["money", "currency", "us"]),
     ("00A2", "cent", ["cent sign", "cents"], ["money"]),
     ("00A3", "pound", ["gbp", "pound sterling", "pound sign", "sterling", "pounds"], ["british", "uk", "currency"]),
@@ -104,7 +90,6 @@ SYMBOLS = [
     ("20A5", None, [], []),
     ("20A7", None, [], ["spain"]),
     ("20B3", None, [], []),
-    # ── punctuation & typography ──
     ("2013", "en dash", ["ndash"], ["dash", "punctuation"]),
     ("2014", "em dash", ["mdash"], ["dash", "punctuation"]),
     ("2015", "horizontal bar", ["quotation dash"], []),
@@ -135,7 +120,6 @@ SYMBOLS = [
     ("2042", "asterism", [], []),
     ("002D", "hyphen", ["hyphen minus"], ["dash", "minus", "subtract"]),
     ("00A0", "no-break space", ["nbsp", "non-breaking space"], []),
-    # ── math & comparison ──
     ("002B", "plus", ["plus sign"], ["add", "addition", "positive"]),
     ("00B1", "plus minus", ["plus or minus", "plus or minus sign"], ["pm", "math"]),
     ("2212", "minus", ["minus sign"], ["subtract", "subtraction", "negative"]),
@@ -187,7 +171,6 @@ SYMBOLS = [
     ("230B", None, [], []),
     ("22C5", "dot operator", ["dot product"], ["dot", "math"]),
     ("007E", "tilde", ["twiddle", "squiggle"], ["approx", "approximately", "about", "not"]),
-    # ── arrows ──
     ("2190", "left arrow", ["leftwards arrow", "arrow left", "left", "west arrow"], ["west", "back", "previous", "direction"]),
     ("2191", "up arrow", ["upwards arrow", "arrow up", "up", "north arrow"], ["north", "direction"]),
     ("2192", "right arrow", ["rightwards arrow", "arrow right", "right", "east arrow"], ["east", "forward", "next", "direction"]),
@@ -226,13 +209,11 @@ SYMBOLS = [
     ("27FA", "long left right double arrow", ["long iff", "long equivalence"], ["logic"]),
     ("27FB", "long left arrow from bar", ["long maps from"], ["mapping", "function"]),
     ("27FC", "long right arrow from bar", ["long maps to", "long mapsto"], ["mapping", "function"]),
-    # ── legal ──
     ("00A9", "copyright", ["copyright sign"], ["law", "legal", "rights"]),
     ("00AE", "registered", ["registered sign", "reg"], ["law", "legal"]),
     ("2122", "trademark", ["tm", "trade mark", "trademark sign"], ["law", "legal", "brand"]),
     ("2120", "service mark", ["sm"], ["law", "legal"]),
     ("2117", "phonogram", ["sound recording copyright"], ["law", "legal"]),
-    # ── geometric shapes ──
     ("25A0", "black square", ["filled square"], ["shape", "square"]),
     ("25A1", "white square", ["empty square", "open square"], ["shape", "square"]),
     ("25AA", None, [], []),
@@ -257,7 +238,6 @@ SYMBOLS = [
     ("2606", "white star", ["outline star", "empty star", "star outline"], ["shape"]),
     ("2726", None, ["four pointed star"], []),
     ("2727", None, ["four pointed star outline"], []),
-    # ── box drawing ──
     ("2500", "horizontal line", ["line", "rule", "box drawing"], ["table", "ascii", "divider"]),
     ("2502", "vertical line", ["pipe", "bar", "box drawing"], ["table", "ascii", "divider"]),
     ("250C", "top left corner", ["box drawing"], ["corner", "table", "ascii"]),
@@ -286,7 +266,6 @@ SYMBOLS = [
     ("256E", "rounded top right corner", ["rounded corner", "box drawing"], ["corner", "table"]),
     ("256F", "rounded bottom right corner", ["rounded corner", "box drawing"], ["corner", "table"]),
     ("2570", "rounded bottom left corner", ["rounded corner", "box drawing"], ["corner", "table"]),
-    # ── block elements ──
     ("2588", None, ["block", "solid block"], ["bar", "fill"]),
     ("2584", None, ["bottom half block"], ["bar", "progress"]),
     ("2580", None, ["top half block"], ["bar", "progress"]),
@@ -295,7 +274,6 @@ SYMBOLS = [
     ("2591", None, [], ["dither", "faded", "grey", "gray"]),
     ("2592", None, [], ["dither", "checker", "grey", "gray"]),
     ("2593", None, [], ["dither", "grey", "gray"]),
-    # ── check marks & crosses ──
     ("2713", "check mark", ["check", "tick", "checkmark", "checked"], ["yes", "correct", "done", "approve"]),
     ("2714", "heavy check mark", ["bold check", "heavy tick"], ["check", "tick"]),
     ("2715", "x mark", ["multiplication x", "cross", "x", "cross mark"], ["close", "incorrect", "times"]),
@@ -305,7 +283,6 @@ SYMBOLS = [
     ("2610", "ballot box", ["empty checkbox", "unchecked box"], ["form", "unchecked"]),
     ("2611", "ballot box with check", ["checkbox", "checked box", "checkbox checked"], ["form", "checked", "tick"]),
     ("2612", "ballot box with x", ["checkbox crossed", "crossed box"], ["form", "crossed"]),
-    # ── dingbats ──
     ("271A", "greek cross", ["bold plus", "heavy greek cross"], ["plus", "cross", "medical"]),
     ("2731", "heavy asterisk", ["bold asterisk", "thick asterisk"], ["emphasis", "footnote"]),
     ("276E", "heavy left angle", ["chevron left", "left angle ornament"], ["quote", "prompt"]),
@@ -313,7 +290,6 @@ SYMBOLS = [
     ("2794", "heavy right arrow", ["fat arrow", "thick arrow"], ["direction"]),
     ("270E", None, ["pencil outline"], ["write", "edit"]),
     ("2720", "maltese cross", ["cross pattee"], ["cross", "badge"]),
-    # ── technical ──
     ("00B5", "micro", ["micro sign"], ["mu", "si"]),
     ("2300", "diameter", ["diameter sign"], ["engineering"]),
     ("2318", "place of interest sign", ["command", "cmd", "command key", "apple", "looped square"], ["mac", "keyboard", "shortcut"]),
@@ -324,7 +300,6 @@ SYMBOLS = [
     ("2116", None, ["numero"], ["number"]),
     ("2103", "degree celsius", ["celsius", "degrees celsius", "centigrade"], ["temperature"]),
     ("2109", "degree fahrenheit", ["fahrenheit", "degrees fahrenheit"], ["temperature"]),
-    # ── letterlike ──
     ("2105", "care of", ["c/o", "c o"], ["address", "mail"]),
     ("2121", "telephone sign", ["tel", "telephone"], ["phone", "contact"]),
     ("211E", "prescription take", ["rx", "prescription"], ["medicine", "pharmacy"]),
@@ -337,7 +312,6 @@ SYMBOLS = [
     ("211D", "real numbers", ["reals", "blackboard r", "double struck r"], ["math", "number"]),
     ("2124", "integers", ["whole numbers", "blackboard z", "double struck z"], ["math", "number"]),
     ("2135", "alef", ["aleph", "infinite cardinal"], ["math", "infinity", "hebrew"]),
-    # ── music & card suits ──
     ("266A", "eighth note", ["note", "quaver"], ["music", "music note"]),
     ("266B", None, ["notes"], ["music", "music notes"]),
     ("2669", "quarter note", ["crotchet"], ["music"]),
@@ -349,7 +323,6 @@ SYMBOLS = [
     ("2666", "diamond suit", ["diamond", "diamonds"], ["card", "suit"]),
     ("2663", "club suit", ["clubs", "club", "trefoil"], ["card", "suit"]),
     ("2660", "spade suit", ["spades", "spade"], ["card", "suit"]),
-    # ── Greek letters (lowercase, then uppercase) ──
     ("03B1", "alpha", ["greek alpha"], []),
     ("03B2", "beta", ["greek beta"], []),
     ("03B3", "gamma", ["greek gamma"], []),
@@ -400,7 +373,6 @@ SYMBOLS = [
     ("03A8", "capital psi", ["greek capital psi"], []),
     ("03A9", "capital omega", ["greek capital omega"], ["ohm"]),
     ("03D5", None, ["greek phi symbol", "variant phi"], []),
-    # ── fractions ──
     ("00BD", "one half", ["half", "1/2"], []),
     ("00BC", "one quarter", ["quarter", "fourth", "1/4"], []),
     ("00BE", "three quarters", ["3/4"], []),
@@ -419,7 +391,6 @@ SYMBOLS = [
     ("2150", "one seventh", ["1/7"], []),
     ("2151", "one ninth", ["1/9"], []),
     ("2152", "one tenth", ["1/10"], []),
-    # ── superscripts & subscripts ──
     ("2070", "superscript zero", [], ["power"]),
     ("00B9", "superscript one", [], ["power"]),
     ("00B2", "superscript two", ["squared"], ["power"]),
@@ -449,7 +420,6 @@ SYMBOLS = [
     ("208C", None, [], ["sub"]),
 ]
 
-
 def load_annotations(path):
     """Return {emoji: (tts_name, [keywords])} from one CLDR annotations file."""
     names, keywords = {}, {}
@@ -468,7 +438,6 @@ def load_annotations(path):
         for cp in names.keys() | keywords.keys()
     }
 
-
 def load_formal_names(path):
     """Return {U+XXXX: formal name} from UnicodeData.txt."""
     formal = {}
@@ -479,11 +448,9 @@ def load_formal_names(path):
                 formal[fields[0]] = fields[1]
     return formal
 
-
 def formal_to_common(formal):
     """'PLUS-MINUS SIGN' -> 'plus minus sign' (searchable common form)."""
     return " ".join(formal.lower().replace("-", " ").split())
-
 
 def term_variants(term):
     """Expand one name/alias with the separator variants people type.
@@ -496,7 +463,6 @@ def term_variants(term):
             if variant not in out:
                 out.append(variant)
     return out
-
 
 def build_symbol_entries(formal):
     """Build the symbol dataset entries from SYMBOLS + formal Unicode names."""
@@ -513,11 +479,6 @@ def build_symbol_entries(formal):
         common_formal = formal_to_common(formal[cp])
         canonical = name if name is not None else common_formal
 
-        # Name-class aliases: the canonical name + curated aliases with
-        # separator variants. The formal Unicode name goes to the weaker
-        # keyword class instead ("MUSIC FLAT SIGN" must not make a "music"
-        # query rank ♭ above 🎵; curated aliases already cover the names
-        # people type, formal jargon just has to stay findable).
         expanded = []
         for term in [canonical] + list(aliases):
             for variant in term_variants(term.lower()):
@@ -539,11 +500,9 @@ def build_symbol_entries(formal):
         })
     return entries
 
-
 def main():
     ann_base, ann_derived, emoji_test, unicode_data = sys.argv[1:5]
 
-    # CLDR's cp keys are FE0F-stripped; merge base + derived (derived wins).
     annotations = load_annotations(ann_base)
     annotations.update(load_annotations(ann_derived))
 
@@ -564,14 +523,8 @@ def main():
                 bare, annotations.get(emoji, ("", []))
             )
             if not name:
-                # comment tail: "<glyph> <version> <name…>"
                 parts = comment.split()
                 name = " ".join(parts[2:]) if len(parts) > 2 else "emoji"
-            # Dedupe keywords, preserving order; drop ones identical to the
-            # name (the name is already searched). Search fields (k, and a
-            # for symbols) are emitted LOWER-CASED: the picker must not
-            # spend its per-callback CPU budget re-normalising them at
-            # load time (see ensureData in picker.luau).
             seen = {name.lower()}
             kws = [
                 k.lower() for k in keywords
@@ -583,17 +536,11 @@ def main():
 
     entries.extend(build_symbol_entries(load_formal_names(unicode_data)))
 
-    # l is consumed on every search and is lowered here (Python's lower()
-    # is Unicode-aware; one entry — Åland — needs it). The z search blob
-    # (lowered name + keywords + aliases) is NOT shipped: it is a pure
-    # concatenation of l + k + a, so the picker derives it while indexing,
-    # and dropping it cuts the JSON the host must decode by a third —
     for entry in entries:
         entry["l"] = entry["n"].lower()
 
     json.dump(entries, sys.stdout, ensure_ascii=False, separators=(",", ":"))
     sys.stdout.write("\n")
-
 
 if __name__ == "__main__":
     main()

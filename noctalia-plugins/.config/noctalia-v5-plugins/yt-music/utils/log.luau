@@ -6,9 +6,6 @@ local function debug_enabled()
 	return noctalia.getConfig("debug_logging") == true
 end
 
--- Bound the file: past MAX_BYTES keep only the newest TRIM_TO bytes (cut at a
--- line boundary), so appends stay cheap and long debug sessions cannot grow
--- the file without limit.
 local MAX_BYTES = 512 * 1024
 local TRIM_TO = 128 * 1024
 
@@ -30,8 +27,6 @@ local function log(tag, msg)
 	append(line)
 end
 
--- Binds a fixed "ytm/<module>" (or "ytapi/<module>") tag so every log
--- line names its origin and layer in the plugin.
 local function module(...)
 	local parts = { ... }
 	local tag = table.concat(parts, "/")

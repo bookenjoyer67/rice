@@ -1,35 +1,4 @@
 #!/usr/bin/env bash
-# fetch-wallpaper.sh — pull ONE random wallpaper from the source and cache it.
-#
-# Source: wallhaven.cc. The look is psychedelic, with surreal, vaporwave and
-# synthwave mixed in, and anime-category psychedelia included (see the pool).
-#
-# Where the pick comes from is the `source` setting in
-# ~/.config/wallpaper/settings (or $WALLPAPER_SOURCE, or the pool file):
-#
-#   pool       a random term from the query list (weighted: "term * 3")
-#   query      the `query` setting as one search term
-#   favorites  a random id from ~/.config/wallpaper/favorites, resolved
-#              through the public /api/v1/w/<id> endpoint (no key needed)
-#
-# `set = <name>` swaps the query list for ~/.config/wallpaper/sets/<name>.txt.
-# `nsfw` picks the purity: off → 100 (SFW), sketchy → 110, all → 111; sketchy
-# and all only return anything beyond SFW with an `apikey`, which is appended
-# to the API call when set. WALLPAPER_* environment variables win over the file.
-#
-# This replaces the old "folder full of wallpapers" model: the cache holds
-# exactly ONE image at a time and is overwritten on every fetch.
-#
-# On success it prints the path of the cached image (exit 0).
-# If the API/download fails it falls back to the cached image (exit 0) so a
-# session can still start offline; only a total miss exits 1.
-#
-# Swipe-reject: wallhaven ids listed one-per-line in $CACHE_DIR/rejected are
-# never returned (see swipe-delete-wallpaper.sh).
-#
-# See the full request URL (query, purity, apikey): WALLPAPER_DEBUG=1.
-# WALLPAPER_DRY_RUN=1 prints the settings and the URL it would request, then
-# exits 0 without touching the cache or the network.
 set -euo pipefail
 
 DER="$(cd "$(dirname "$(readlink -f "$0")")" && pwd)"
@@ -42,15 +11,10 @@ RECENT="$CACHE_DIR/recent"
 STATE_ID="$CACHE_DIR/current.id"
 UA="Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36"
 MIN_BYTES=100000
-# Default minimum resolution for a pick (from the settings file).
 MIN_RES="$WS_MIN_RES"
-# Psychedelic means vivid: mean HSL saturation below this is treated as a dud
-# and re-rolled (dark game art, greyscale minimalism, muted landscapes).
 MIN_SATURATION="$WS_MIN_SAT"
 MAX_ATTEMPTS=4
 
-# The query list to draw from: the pool file, or sets/<name>.txt when `set` is
-# non-empty (resolved once, in read-settings.sh).
 LIST_FILE="$WS_LIST_FILE"
 CATEGORIES="111"
 SOURCE="$WS_SOURCE"
@@ -62,22 +26,13 @@ FAV_FILE="$WS_FAVORITES"
 FAV_TRIES=6
 MAX_EXPANDED=10000
 
-# Wallhaven answers an anonymous sketchy/NSFW request with SFW results only, so
-# say so instead of implying the level took effect. Never a failing status: the
-# callers run under `set -e` and only the fetched path matters to them.
 if [ "$NSFW" != "off" ] && [ -z "$APIKEY" ]; then
     printf 'fetch-wallpaper: nsfw=%s needs apikey — wallhaven will still return SFW only\n' "$NSFW" >&2
 fi
 
-# ------------------------------------------------------------ query lists
-
 TERMS=()
 TERM_WEIGHTED=0
 
-# Reads a query list: blank lines and '#' comments skip, "TERM * N" adds TERM
-# N times, anything else adds TERM once. The weights are expanded here so the
-# pick stays a plain $RANDOM index, and the existing unweighted pool.txt keeps
-# behaving exactly as before.
 load_terms() {
     local file="$1" line term weight i capped=0 total unique
     local -A seen=()
@@ -123,8 +78,6 @@ load_terms() {
     fi
 }
 
-# Preconditions. The query list is only needed by the sources that draw a term
-# from it: favorites are ids, and a non-empty `query` term is used as it stands.
 NEED_TERMS=1
 if [ "$SOURCE" = "favorites" ]; then
     NEED_TERMS=0
@@ -153,10 +106,6 @@ if [ "$SOURCE" = "favorites" ] && [ ! -r "$FAV_FILE" ]; then
     exit 1
 fi
 
-# ------------------------------------------------------------ request URLs
-
-# Percent-encodes the query: % first, then the characters that would otherwise
-# change the URL's meaning (space, &, #, +, comma).
 encode_query() {
     local s="$1"
     s="${s//'%'/%25}"
@@ -171,8 +120,6 @@ encode_query() {
 search_url() {
     local term="$1" seed="$2" qq url atleast
     qq="$(encode_query "$term")"
-    # The panel's "Any size" writes min_res = any, which is the absence of a
-    # floor: send no atleast= rather than a value wallhaven cannot parse.
     case "$MIN_RES" in
         ''|any) atleast="" ;;
         *)      atleast="&atleast=$MIN_RES" ;;
@@ -184,7 +131,6 @@ search_url() {
     printf '%s' "$url"
 }
 
-# /w/<id> has no query string yet, so the key is introduced with '?'.
 detail_url() {
     local id="$1" url="https://wallhaven.cc/api/v1/w/$id"
     if [ -n "$APIKEY" ]; then
@@ -193,9 +139,6 @@ detail_url() {
     printf '%s' "$url"
 }
 
-# Prints the usable favourite ids, one per line: comments and blanks skip, ids
-# already swiped away always skip, and the recently shown ones skip until the
-# final attempt (SKIP_RECENT) so a short list cannot dead-end.
 favorite_ids() {
     local line id
     local -A skip=()
@@ -226,8 +169,6 @@ favorite_ids() {
     done < "$FAV_FILE"
 }
 
-# Offline proof that the settings reach the request: prints what it would ask
-# for and stops before any cache write, lock or network call.
 dry_run() {
     local term="" id="" url="" line
     local -a ids=()
@@ -272,15 +213,12 @@ touch "$REJECTED" "$RECENT"
 
 cached() { ls "$CACHE_DIR"/wallpaper.* 2>/dev/null | head -n1; }
 
-# Remember the last few shown ids (ring buffer) so the next switch does not
-# land on an image already on screen.
 remember() {
     local id="$1"
     grep -qxF -- "$id" "$RECENT" 2>/dev/null || printf '%s\n' "$id" >> "$RECENT"
     tail -n 30 "$RECENT" > "$RECENT.tmp" 2>/dev/null && mv "$RECENT.tmp" "$RECENT"
 }
 
-# Mean saturation (0..1) via ImageMagick. Empty when it is not installed.
 saturation() {
     local im
     if command -v magick >/dev/null 2>&1; then im=magick
@@ -289,18 +227,13 @@ saturation() {
     "$im" "$1" -colorspace HSL -channel G -separate -format '%[fx:mean]' info: 2>/dev/null
 }
 
-# True when the image is vivid enough to pass as psychedelic.
 vivid_enough() {
     local sat
     sat="$(saturation "$1")"
-    # no ImageMagick / unreadable → do not block the wallpaper on it
     [ -n "${sat:-}" ] || return 0
     awk -v s="$sat" -v m="$MIN_SATURATION" 'BEGIN { exit !(s >= m) }'
 }
 
-# Pick a random result from a random pool entry (or the one `query` term),
-# skipping rejected ids. Prints "id<TAB>path" (or nothing when every result
-# was rejected).
 pick_search() {
     local term seed idx recfile url
     if [ "$SOURCE" = "query" ] && [ -n "$QE" ]; then
@@ -311,8 +244,6 @@ pick_search() {
     seed="$RANDOM$RANDOM$RANDOM"
     idx="$RANDOM"
     recfile="$RECENT"
-    # SKIP_RECENT is set on the final attempt: stop excluding recent picks so a
-    # small pool cannot dead-end into "no image".
     if [ -n "${SKIP_RECENT:-}" ]; then
         recfile=/dev/null
     fi
@@ -325,25 +256,16 @@ pick_search() {
 
     curl -fsS --max-time 30 -A "$UA" "$url" 2>/dev/null \
     | jq -r --rawfile rej "$REJECTED" --rawfile rec "$recfile" --argjson idx "$idx" '
-        # skip swiped-away ids AND the last few we already showed, so a switch
-        # never lands on the image that is already on screen
         (($rej | split("\n") | map(select(length > 0)))
          + ($rec | split("\n") | map(select(length > 0)))) as $skip
         | [ .data[] | select(([.id] | inside($skip)) | not) ] as $ok
         | select(($ok | length) > 0)
-        # quality floor: pick at random out of the top half of this page by
-        # favourites. Taking only the top 3 funnelled every switch into the
-        # same handful of popular images (the duplicate problem); half the
-        # page keeps a floor without shrinking the pool.
         | ($ok | sort_by(-.favorites) | .[0:12]) as $top
         | $top[ ($idx % ($top | length)) ]
         | "\(.id)\t\(.path)"
       '
 }
 
-# Pick one favourite id and resolve its full image path through the public
-# detail endpoint, at most FAV_TRIES times. Prints "id<TAB>path"; returns 1
-# when the list is exhausted, which the caller treats like an empty search.
 pick_favorite() {
     local -a ids=()
     local line id path purity data meta start len k url
@@ -399,7 +321,6 @@ next_candidate() {
     esac
 }
 
-# Download id/path into the single-file cache. Prints the saved path.
 download() {
     local id="$1" url="$2" ext dest tmp size
     ext="${url##*.}"; ext="${ext%%\?*}"
@@ -413,21 +334,15 @@ download() {
         rm -f "$tmp"; return 1
     fi
     mv -f "$tmp" "$dest"
-    # drop any stale image left from a previous extension (.jpg vs .png)
     find "$CACHE_DIR" -maxdepth 1 -type f -name 'wallpaper.*' \
         ! -name "wallpaper.$ext" -delete 2>/dev/null || true
     printf '%s\n' "$id" > "$STATE_ID"
-    # append-only history for the wallpaper browser (recent stays a 30-entry ring)
     printf '%s\t%s\n' "$id" "$(date +%s)" >> "$CACHE_DIR/history"
     tail -n 1000 "$CACHE_DIR/history" > "$CACHE_DIR/history.tmp" 2>/dev/null \
         && mv "$CACHE_DIR/history.tmp" "$CACHE_DIR/history"
     printf '%s\n' "$dest"
 }
 
-# Serialize fetches. Rapid repeated keypresses would otherwise run two fetches
-# at once, both writing $CACHE_DIR/wallpaper.*.part and both running the
-# stale-extension cleanup — which can leave a partial file or delete the image
-# the other run just saved.
 LOCK="$CACHE_DIR/.fetch.lock"
 exec 9>"$LOCK"
 if ! flock -w 25 9; then
@@ -439,7 +354,6 @@ if ! flock -w 25 9; then
     exit 1
 fi
 
-# We hold the lock, so any .part here is a leftover from a killed run.
 rm -f "$CACHE_DIR"/wallpaper.*.part 2>/dev/null || true
 
 attempt=0
@@ -475,8 +389,6 @@ if [ -n "$chosen" ]; then
     exit 0
 fi
 
-# Every attempt was dull, or the network/API failed: the last download (if any)
-# is already in the cache, so keep showing it rather than nothing.
 if img="$(cached)" && [ -n "$img" ]; then
     printf '%s\n' "$img"
     exit 0

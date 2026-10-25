@@ -29,7 +29,6 @@ animations {
       "
     }
 
-    // Original by Lemmy: https://github.com/ItsLemmy
     window-close {
       duration-ms 700
       curve "linear"

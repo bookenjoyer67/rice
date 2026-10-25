@@ -1,4 +1,3 @@
--- Native Noctalia v5 port of Catwalk's original animated SVG bar widget.
 local frame = 0
 local iconSize = 22
 local pluginDir = noctalia.pluginDir()
@@ -9,8 +8,6 @@ local themeMode = "dark"
 local themeCheckPending = false
 local themeCheckElapsed = 2000
 
--- Ask Noctalia for its resolved mode so wallpaper-driven "auto" mode works too.
--- Two physical SVG sets avoid relying on image tinting, which setImage lacks.
 local function refreshThemeMode()
   if themeCheckPending or themeCheckElapsed < 2000 then return end
   themeCheckPending = true
@@ -25,7 +22,6 @@ local function refreshThemeMode()
   end, 2000)
 end
 
--- Translate total CPU utilization into animation delay: more work, faster cat.
 local function animationDelay(usage)
   if usage == nil or usage <= 10 then return 550 end
   if usage <= 35 then return math.floor(400 - ((usage - 10) / 25) * 150) end
@@ -40,7 +36,6 @@ local function mood(usage)
   return "zooming"
 end
 
--- Calculate aggregate utilization from the change in Linux CPU accounting counters.
 local function readCpuUsage()
   local raw = noctalia.readFile("/proc/stat")
   local firstLine = raw and string.match(raw, "([^\n]+)")
@@ -70,13 +65,11 @@ end
 local function drawCat()
   readCpuUsage()
   refreshThemeMode()
-  -- A genuinely idle CPU uses the original sleeping frames; active states run.
   local sleeping = cpuUsage == nil or cpuUsage <= 10
   local animation = sleeping and "idle" or "active"
   local frameCount = sleeping and 4 or 5
   frame = frame % frameCount
   local image = pluginDir .. "/icons/" .. themeMode .. "/my-" .. animation .. "-" .. tostring(frame) .. "-symbolic.svg"
-  -- Dark-mode frames are white; light-mode frames are black for clear contrast.
   barWidget.setImage(image, true, iconSize, iconSize)
   local detail = cpuUsage and string.format("%.0f%% CPU · %s", cpuUsage, mood(cpuUsage)) or "measuring CPU"
   barWidget.setTooltip("Catwalk · " .. detail)
@@ -90,5 +83,4 @@ function update()
   drawCat()
 end
 
--- Start slowly; the first two samples establish the utilization baseline.
 noctalia.setUpdateInterval(550)

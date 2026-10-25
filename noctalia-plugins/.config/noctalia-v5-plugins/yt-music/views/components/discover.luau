@@ -29,7 +29,6 @@ local function build_discover()
 	)
 	table.insert(view, ui.row({ key = "spacer-disc-1", height = 8, borderWidth = 0, radius = theme.radius }))
 
-	-- Search type filter chips (Top, Songs, Playlists, Albums, Artists)
 	local chips = {
 		{ id = "top", label = "Top" },
 		{ id = "songs", label = "Songs" },

@@ -1,7 +1,5 @@
 --!strict
 
--- like / unlike endpoints.
-
 local logger = require("../utils/log.luau")
 local log = logger.module("ytapi", "likes")
 

@@ -1,21 +1,4 @@
 #!/usr/bin/env bash
-# ---------------------------------------------------------------------------
-# Build tuigreet with the "Matrix Peak" login background and install it.
-#
-# tuigreet's matrix takes three fixed colours and its background menu is a
-# hard-coded catalog, so the rainbow wave and the "Matrix Peak" entry come from
-# tuigreet/matrix-peak.patch against the upstream tag. This script applies that
-# patch to a clean checkout, runs the animation tests, builds, and installs the
-# binary to /usr/local/bin — which greetd resolves before the packaged
-# /usr/bin/tuigreet, so the package itself is never touched or replaced.
-#
-#   tuigreet-patch/build-matrix-peak.sh              build + install (sudo for /usr/local)
-#   tuigreet-patch/build-matrix-peak.sh --no-install compile only
-#   tuigreet-patch/build-matrix-peak.sh --uninstall  remove /usr/local/bin/tuigreet
-#
-# Env: TUIGREET_TAG (default 0.11.1), TUIGREET_BUILD_DIR.
-# Rebuild after a tuigreet package update: bump TUIGREET_TAG to the new version.
-# ---------------------------------------------------------------------------
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -33,7 +16,6 @@ if [ "$MODE" = "--uninstall" ]; then
   exit 0
 fi
 
-# --- what is installed right now -------------------------------------------
 installed="$(pacman -Q greetd-tuigreet 2>/dev/null | awk '{print $2}')" || true
 if [ -n "$installed" ]; then
   case "$installed" in
@@ -48,7 +30,6 @@ for bin in git cargo; do
   command -v "$bin" >/dev/null 2>&1 || { say "missing $bin"; exit 1; }
 done
 
-# --- clean checkout at the tag, patch applied ------------------------------
 rm -rf "$WORK"
 mkdir -p "$WORK"
 say "cloning tuigreet $TAG -> $WORK"
