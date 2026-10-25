@@ -9,6 +9,7 @@
 #   ./install.sh                 link configs into $HOME
 #   ./install.sh --dry-run       show what would happen, touch nothing
 #   ./install.sh --build-shim    also compile noctalia-layer-swap.so
+#   ./install.sh --no-bars       skip compiling wallpaper-bars-gpu
 #   ./install.sh --with-system   also install /etc/greetd/config.toml (sudo)
 # ---------------------------------------------------------------------------
 set -euo pipefail
@@ -16,7 +17,7 @@ shopt -s nullglob
 
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 TS="$(date +%Y%m%d-%H%M%S)"
-DRY=0; SYSTEM=0; SHIM=1; DEPS=1
+DRY=0; SYSTEM=0; SHIM=1; DEPS=1; BARS=1
 
 usage() {
   cat <<'EOF'
@@ -26,10 +27,11 @@ Symlinks every package in this repo into $HOME (no stow required). Any file
 or directory it would overwrite is moved aside to <name>.bak-<timestamp>
 first, so nothing is ever destroyed.
 
-  ./install.sh                 packages, configs, Noctalia state, shim
+  ./install.sh                 packages, configs, Noctalia state, shim, bars
   ./install.sh --dry-run       show what would happen, touch nothing
   ./install.sh --no-deps       do not install packages (configs only)
   ./install.sh --no-shim       skip compiling noctalia-layer-swap.so
+  ./install.sh --no-bars       skip compiling wallpaper-bars-gpu
   ./install.sh --with-system   also install /etc/greetd/config.toml (needs sudo)
 
 Package lists: packages.txt (official repos) and aur-packages.txt (brave-bin,
@@ -46,6 +48,8 @@ for arg in "$@"; do
     -n|--dry-run)   DRY=1 ;;
     --build-shim)   SHIM=1 ;;
     --no-shim)      SHIM=0 ;;
+    --build-bars)   BARS=1 ;;
+    --no-bars)      BARS=0 ;;
     --no-deps)      DEPS=0 ;;
     --with-system)  SYSTEM=1 ;;
     -h|--help)      usage ;;
@@ -498,6 +502,42 @@ else
   say "but desktop widgets will zoom with the workspace in the overview."
 fi
 
+
+# --- the GPU cava bars -----------------------------------------------------
+# The wallpaper-bars widget was replaced by a layer-shell GLES renderer because
+# cairo rasterising ~1400 translucent boxes per output cost about a full core.
+# The binary is a build artifact, not a tracked file, so a fresh install has to
+# compile it or the spawn-at-startup line in config.kdl points at nothing.
+say ""
+if [ "$BARS" -eq 1 ]; then
+  BARS_SRC="$REPO/wallpaper-bars-gpu/.local/src/wallpaper-bars-gpu"
+  say "Building wallpaper-bars-gpu"
+  if [ "$DRY" -eq 1 ]; then
+    say "  would: make -C $BARS_SRC && make -C $BARS_SRC install"
+    say "  -> installs \$HOME/.local/bin/wallpaper-bars-gpu"
+  elif ! command -v make >/dev/null 2>&1 || ! command -v cc >/dev/null 2>&1; then
+    say "  SKIP      no C toolchain (make + cc): install base-devel, then rerun"
+  elif ! pkg-config --exists wayland-client wayland-egl egl glesv2 2>/dev/null; then
+    say "  SKIP      missing dev headers: wayland egl glesv2 (--no-bars to ignore)"
+  else
+    if ! make -C "$BARS_SRC" >/dev/null; then
+      echo "  ERROR: wallpaper-bars-gpu failed to build" >&2
+      exit 1
+    fi
+    make -C "$BARS_SRC" install >/dev/null
+    if [ -x "$HOME/.local/bin/wallpaper-bars-gpu" ]; then
+      say "  installed ~/.local/bin/wallpaper-bars-gpu"
+      say "  needs cava + imagemagick at runtime; cava.conf is linked from this repo"
+    else
+      echo "  ERROR: wallpaper-bars-gpu did not land in ~/.local/bin" >&2
+      exit 1
+    fi
+  fi
+else
+  say "Bars not built (--no-bars). Mod+B and the startup line will find no binary,"
+  say "so the cava bars simply do not appear."
+fi
+
 # --- system greeter config -------------------------------------------------
 if [ "$SYSTEM" -eq 1 ]; then
   say ""
@@ -543,6 +583,6 @@ fi
 say ""
 say "Done. Next:"
 say "  1. Log out and back in — or reload in place:  niri msg action load-config-file"
-say "  2. Runtime deps:  niri noctalia matugen awww tuigreet kitty cliphist"
+say "  2. Runtime deps:  niri noctalia matugen awww tuigreet kitty cliphist cava imagemagick"
 say "                    wl-clipboard grim slurp swaylock brightnessctl wlsunset"
 say "  3. Optional:  swaylock + the lock scripts need ~/.local/bin on \$PATH."

@@ -14,6 +14,9 @@ core of CPU. Measured on this box: ~110% CPU for the widget, ~1-2% for this.
     make            # wayland-scanner + cc
     make install    # -> ~/.local/bin/wallpaper-bars-gpu
 
+`./install.sh` in the repo root does both, and links the cava feed config
+(`cava.conf`) into `~/.config/wallpaper-bars-gpu/`. Pass `--no-bars` to skip it.
+
 Autostart is a `spawn-at-startup` line in `niri/.config/niri/config.kdl`;
 `Mod+B` runs `niri/.config/niri/scripts/toggle-wallpaper-bars.sh` to stop/start it.
 
