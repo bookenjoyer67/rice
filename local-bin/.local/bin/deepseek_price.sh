@@ -93,6 +93,46 @@ USD_PRICE=$(echo "$RMB_PRICE * $RATE" | bc -l)
 USD_PRICE=$(printf "%.2f" "$USD_PRICE")
 
 # ------------------------------------------------------------
+# Account balance (api.deepseek.com/user/balance)
+# Cached for 5 min: the widget re-runs this script every 60s and
+# the balance only moves when tokens are actually spent.
+# ------------------------------------------------------------
+BAL_CACHE="/tmp/deepseek_balance.cache"
+BAL_TTL=300
+# `deepseek_price.sh --force` (widget click) skips the balance cache.
+[ "$1" = "--force" ] && BAL_TTL=0
+BALANCE=""
+
+if [ -n "$DEEPSEEK_API_KEY" ]; then
+    DS_KEY="$DEEPSEEK_API_KEY"
+elif [ -r "$HOME/.config/komun-sandbox/deepseek.key" ]; then
+    DS_KEY=$(tr -d '\r\n' < "$HOME/.config/komun-sandbox/deepseek.key")
+elif [ -r "$HOME/.hermes/.env" ]; then
+    DS_KEY=$(grep -m1 '^DEEPSEEK_API_KEY=' "$HOME/.hermes/.env" | cut -d= -f2- | tr -d '"'"'"'\r\n')
+fi
+
+if [ -f "$BAL_CACHE" ] && [ $(($(date +%s) - $(stat -c %Y "$BAL_CACHE"))) -lt $BAL_TTL ]; then
+    BALANCE=$(cat "$BAL_CACHE")
+elif [ -n "$DS_KEY" ]; then
+    BAL_JSON=$(curl -s --max-time 8 -H "Authorization: Bearer $DS_KEY" https://api.deepseek.com/user/balance)
+    BAL_AMT=$(echo "$BAL_JSON" | jq -r '.balance_infos[0].total_balance // empty' 2>/dev/null)
+    BAL_CUR=$(echo "$BAL_JSON" | jq -r '.balance_infos[0].currency // "USD"' 2>/dev/null)
+    if [ -n "$BAL_AMT" ] && [ "$BAL_AMT" != "null" ]; then
+        # Only reached on a real answer, so a failed call keeps the last figure.
+        case "$BAL_CUR" in
+            CNY) BAL_SYM="¥" ;;
+            *)   BAL_SYM="\$" ;;
+        esac
+        BALANCE=$(printf '%s%.2f' "$BAL_SYM" "$BAL_AMT")
+        echo "$BALANCE" > "$BAL_CACHE"
+    fi
+fi
+
+if [ -z "$BALANCE" ] && [ -r "$BAL_CACHE" ]; then
+    BALANCE=$(cat "$BAL_CACHE")
+fi
+
+# ------------------------------------------------------------
 # Output JSON
 # ------------------------------------------------------------
-echo "{\"period\": \"$PERIOD\", \"price\": \"\$$USD_PRICE USD/M\", \"time_left\": \"$TIME_LEFT\"}"
+echo "{\"period\": \"$PERIOD\", \"price\": \"\$$USD_PRICE USD/M\", \"time_left\": \"$TIME_LEFT\", \"balance\": \"$BALANCE\"}"

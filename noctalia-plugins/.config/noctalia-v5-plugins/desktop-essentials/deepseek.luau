@@ -1,14 +1,16 @@
 --!nonstrict
--- Desktop DeepSeek rate widget: peak/off-peak period, USD/M price and the
--- countdown to the next switch, from ~/.config/eww/scripts/deepseek_price.sh
--- (the exact script the eww deepseek widget polled every 60s). Re-polled once a
--- minute so the countdown matches what eww showed.
+-- Desktop DeepSeek rate widget: peak/off-peak period, USD/M price, the countdown
+-- to the next switch and the account's remaining balance, all from
+-- ~/.local/bin/deepseek_price.sh (the script the old eww deepseek widget polled
+-- every 60s; it now also reports the /user/balance figure, cached 5 min inside
+-- the script). Re-polled once a minute so the countdown matches what eww showed;
+-- click forces a fresh poll (balance cache bypassed).
 
 local HOME = noctalia.getenv("HOME") or ""
 local SCRIPT = HOME .. "/.local/bin/deepseek_price.sh"
 local REFRESH_SECONDS = 60
 
-local period, price, timeLeft = "Waiting...", "...", "..."
+local period, price, timeLeft, balance = "Waiting...", "...", "...", ""
 local ticks = 0
 
 local function render()
@@ -24,12 +26,24 @@ local function render()
       ui.label({ text = period, fontSize = 13, fontWeight = "bold" }),
       ui.label({ text = price, fontSize = 13, fontWeight = "bold", color = "tertiary" }),
     }),
-    ui.label({ text = timeLeft .. " until switch", fontSize = 12, color = "secondary" }),
+    ui.row({ gap = 12, align = "center" }, {
+      ui.label({ text = timeLeft .. " until switch", fontSize = 12, color = "secondary" }),
+      ui.label({
+        text = balance ~= "" and (balance .. " left") or "-- left",
+        fontSize = 12,
+        fontWeight = "bold",
+        color = "primary",
+        onClick = "onDeepseekClick",
+      }),
+    }),
   }))
 end
 
-local function refresh()
-  noctalia.runAsync({ SCRIPT }, function(result)
+local function refresh(force)
+  local argv = { SCRIPT }
+  if force then argv = { SCRIPT, "--force" } end
+
+  noctalia.runAsync(argv, function(result)
     if result.exitCode ~= 0 then return end
     local data = noctalia.json.decode(result.stdout or "")
     if type(data) ~= "table" then return end
@@ -37,22 +51,27 @@ local function refresh()
     local newPeriod = data.period or period
     local newPrice = data.price or price
     local newLeft = data.time_left or timeLeft
+    local newBalance = data.balance or balance
 
-    if newPeriod ~= period or newPrice ~= price or newLeft ~= timeLeft then
-      period, price, timeLeft = newPeriod, newPrice, newLeft
+    if newPeriod ~= period or newPrice ~= price or newLeft ~= timeLeft or newBalance ~= balance then
+      period, price, timeLeft, balance = newPeriod, newPrice, newLeft, newBalance
       render()
     end
   end)
+end
+
+function onDeepseekClick()
+  refresh(true)
 end
 
 function update()
   ticks += 1
   if ticks >= REFRESH_SECONDS then
     ticks = 0
-    refresh()
+    refresh(false)
   end
 end
 
-refresh()
+refresh(false)
 desktopWidget.setWantsSecondTicks(true)
 render()

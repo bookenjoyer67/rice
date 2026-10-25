@@ -27,8 +27,9 @@ local function num(v, d)
   return n
 end
 
-local bands = math.clamp(math.floor(num(noctalia.getConfig("bands"), 64)), 8, 128)
+local bands = math.clamp(math.floor(num(noctalia.getConfig("bands"), 128)), 8, 256)
 local fps = math.clamp(math.floor(num(noctalia.getConfig("fps"), 60)), 10, 240)
+local blur = math.clamp(num(noctalia.getConfig("blur"), 1.0), 0, 1)
 
 local dataDir = noctalia.pluginDataDir() or "/tmp/noctalia-wallpaper-bars"
 noctalia.mkdirAll(dataDir)
@@ -241,11 +242,13 @@ local function sample(name, path, x0, y0, x1, y1, out, signature)
 
       -- Reduce to bare hex INSIDE the pipeline: parsing a full `txt:-` dump
       -- (~40 bytes per pixel) in Luau is what blew the callback CPU budget.
-      -- Output is one line, 6 hex digits per pixel, row-major.
+      -- Output is one line, 6 hex digits per pixel, row-major. A small blur on
+      -- the tiny grid merges neighbouring colours, so the mist does not read
+      -- as sharp colour stripes.
       local pipeline = string.format(
-        "magick %s -auto-orient -crop %s +repage -resize %dx%d! -depth 8 txt:- "
+        "magick %s -auto-orient -crop %s +repage -resize %dx%d! -blur 0x%.2f -depth 8 txt:- "
           .. "| sed -n 's/.*#\\([0-9A-Fa-f]\\{6\\}\\).*/\\1/p' | tr -d '\\n'",
-        shq(path), crop, bands, ROWS)
+        shq(path), crop, bands, ROWS, blur * 2)
 
       noctalia.runAsync({ "sh", "-c", pipeline }, function(res2)
         local ok2, err2 = pcall(function()
@@ -352,6 +355,7 @@ local function refresh()
       end
       local sig = tostring(wp) .. "|" .. stamp .. "|" .. tostring(x0) .. "," .. tostring(y0) .. ","
         .. tostring(x1) .. "," .. tostring(y1) .. "|" .. tostring(bands) .. "x" .. tostring(ROWS)
+        .. ":b" .. tostring(blur)
       if sig ~= signatures[name] then
         sample(name, wp, x0, y0, x1, y1, out, sig)
       end

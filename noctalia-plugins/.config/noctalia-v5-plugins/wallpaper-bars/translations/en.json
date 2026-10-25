@@ -9,7 +9,12 @@
       "label": "Bands"
     },
     "bar_opacity": {
+      "description": "Lower is more transparent; 1 draws solid bars",
       "label": "Bar opacity"
+    },
+    "blur": {
+      "description": "How far each bar melts into a diffuse glow. 0 draws crisp bars, 1 is coloured mist",
+      "label": "Blur"
     },
     "brightness": {
       "description": "How far each bar is lifted toward white so it reads on a dark wallpaper",

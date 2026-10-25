@@ -76,7 +76,7 @@ link_obj() {
 
 # Mirror a package into $HOME. Shared platform directories are recursed into;
 # everything else is owned wholesale by the package (backed up, then linked),
-# so two packages can never fight over ~/.local/bin or ~/.config/hypr.
+# so two packages can never fight over ~/.local/bin or ~/.config/niri.
 is_container() {
   case "$1" in
     "$HOME"|"$HOME/.config"|"$HOME/.local"|"$HOME/.local/bin"|\
@@ -357,6 +357,20 @@ if command -v fc-list >/dev/null 2>&1; then
   else
     say "  MISSING   emoji coverage — pacman -S noto-fonts-emoji"
   fi
+fi
+
+# --- wallpaper pool ---------------------------------------------------------
+# ~/.config/wallpaper/pool.txt is the user's own file: seed it if missing,
+# never overwrite, and never symlink it into the repo.
+POOL_DST="$HOME/.config/wallpaper/pool.txt"
+say ""
+say "Wallpaper pool"
+run mkdir -p "$HOME/.config/wallpaper"
+if [ -e "$POOL_DST" ]; then
+  say "  keep      ~/.config/wallpaper/pool.txt"
+else
+  run cp -f "$REPO/wallpaper-pool.default.txt" "$POOL_DST"
+  say "  seed      ~/.config/wallpaper/pool.txt"
 fi
 
 # --- Noctalia state ---------------------------------------------------------

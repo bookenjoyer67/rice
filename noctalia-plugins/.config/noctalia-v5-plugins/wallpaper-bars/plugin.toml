@@ -27,15 +27,15 @@ key = "bands"
 type = "int"
 label_key = "settings.bands.label"
 description_key = "settings.bands.description"
-default = 64
+default = 128
 min = 8
-max = 128
+max = 256
 
 [[setting]]
 key = "gap"
 type = "double"
 label_key = "settings.gap.label"
-default = 3.0
+default = 1.5
 min = 0.0
 max = 24.0
 step = 0.5
@@ -72,6 +72,16 @@ max = 1.0
 step = 0.02
 
 [[setting]]
+key = "blur"
+type = "double"
+label_key = "settings.blur.label"
+description_key = "settings.blur.description"
+default = 1.0
+min = 0.0
+max = 1.0
+step = 0.05
+
+[[setting]]
 key = "saturation"
 type = "double"
 label_key = "settings.saturation.label"
@@ -94,7 +104,8 @@ step = 0.02
 key = "bar_opacity"
 type = "double"
 label_key = "settings.bar_opacity.label"
-default = 0.92
+description_key = "settings.bar_opacity.description"
+default = 0.75
 min = 0.1
 max = 1.0
 step = 0.02

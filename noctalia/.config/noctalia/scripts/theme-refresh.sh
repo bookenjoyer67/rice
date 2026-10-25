@@ -1,30 +1,5 @@
 #!/usr/bin/env bash
 # theme-refresh.sh — force the rice palette to re-derive from the wallpaper
-# that is actually on screen, and push it into Brave.
-#
-# Noctalia re-extracts its shell palette when it is handed an image. Handing it
-# the SAME path it already holds is a no-op, so this script copies the current
-# wallpaper to one of two stable scratch paths and alternates between them:
-# every press is therefore a new path with the same pixels, which makes the
-# shell recompute the palette and re-render the theme templates.
-#
-# What it does:
-#   1. matugen regenerates the app palettes (kitty / nvim / starship / palette).
-#   2. Alternating copy + `noctalia msg wallpaper-set` -> shell palette
-#      (bar, panels, widgets, OSD) is re-extracted from the wallpaper.
-#   3. Waits for the async extraction by polling the rendered niri focus ring
-#      against the accent the CLI derives from the same image, then runs
-#      `noctalia msg templates-apply` so every template renders from the NEW
-#      palette (not the previous one).
-#   4. Brave: installs the rendered theme files, retries the render if the
-#      manifest accent still disagrees with the palette, deletes Chromium's
-#      stale "Cached Theme.pak" (it is served at startup and hides manifest
-#      changes), and (with --restart-brave) restarts Brave gracefully with
-#      --restore-last-session so the theme rebuilds from the new palette.
-#   5. Lock backdrops are re-graded in the background.
-#
-# Deliberately does NOT re-paint with awww: the wallpaper on screen is already
-# correct, only the colours derived from it are stale.
 set -uo pipefail
 
 # The bar button's left click passes --restart-brave: Chromium only reads a

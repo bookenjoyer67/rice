@@ -4,7 +4,7 @@
 #   prints:  "rec<TAB><elapsed-seconds><TAB><file>"   while recording
 #   prints:  nothing (exit 0)                          when idle
 #
-# Detects the record-screen.sh toggle (~/.config/hypr/scripts/record-screen.sh),
+# Detects the record-screen.sh toggle (~/.config/niri/scripts/record-screen.sh),
 # which runs wf-recorder with a pidfile in $XDG_RUNTIME_DIR. Falls back to any
 # live wf-recorder process, then to an OBS output file held open for writing
 # (OBS replay-buffer files are ignored).

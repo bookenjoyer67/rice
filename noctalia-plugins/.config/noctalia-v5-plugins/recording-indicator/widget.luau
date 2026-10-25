@@ -7,10 +7,10 @@
 -- pidfile / process table and OBS's open output file.
 --
 -- Left click stops the current recording by running the same toggle script the
--- Mod+Shift+R bind uses (~/.config/hypr/scripts/record-screen.sh).
+-- Mod+Shift+R bind uses (~/.config/niri/scripts/record-screen.sh).
 
 local STATUS = "bash \"$HOME/.config/noctalia/scripts/record-status.sh\""
-local TOGGLE = "bash \"$HOME/.config/hypr/scripts/record-screen.sh\""
+local TOGGLE = "bash \"$HOME/.config/niri/scripts/record-screen.sh\""
 
 local recording = false
 local elapsed = 0

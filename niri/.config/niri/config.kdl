@@ -9,6 +9,9 @@ input {
         }
         numlock
     }
+    mouse {
+      accel-speed 1.0
+    }
 
     touchpad {
         tap
@@ -91,12 +94,15 @@ layout {
     always-center-single-column
     background-color "transparent"
 
-    default-column-width { proportion 0.5; }
+    default-column-width { proportion 0.33333; }
 
     preset-column-widths {
+        proportion 0.25
         proportion 0.33333
         proportion 0.5
         proportion 0.66667
+        proportion 0.75
+        proportion 1.0
     }
 
     focus-ring {
@@ -167,7 +173,9 @@ cursor {
 screenshot-path "~/Pictures/Screenshots/Screenshot from %Y-%m-%d %H-%M-%S.png"
 
 hotkey-overlay {
-    // Show the "Important Hotkeys" popup on first start; SUPER+SHIFT+/ reopens it.
+    // Do NOT show the "Important Hotkeys" popup on first start.
+    // SUPER+SHIFT+/ still opens it on demand.
+    skip-at-startup
 }
 
 // Built-in idle timeout is not available in niri 26.04 (no `idle` config node).
@@ -203,8 +211,12 @@ spawn-at-startup "sh" "-c" "LD_PRELOAD=\"$HOME/.local/lib/noctalia-layer-swap.so
 // xwayland-satellite {
 //     path "$HOME/.local/bin/xwayland-satellite"
 // }
-spawn-at-startup "bash" "-c" "$HOME/.config/hypr/start-wallpaper-one.sh"   // awww daemon + set ONE random wallpaper at startup (rotation DISABLED, user switches manually)
-spawn-at-startup "bash" "-c" "$HOME/.config/hypr/wallpaper-hotplug.sh"     // re-paint wallpaper on monitors that (re)connect after startup (e.g. the flapping HDMI TV)
+spawn-at-startup "bash" "-c" "$HOME/.config/niri/scripts/start-wallpaper-one.sh"   // awww daemon + re-paint the CURRENT wallpaper at startup (no new image; rotation DISABLED, user switches manually)
+spawn-at-startup "bash" "-c" "$HOME/.config/niri/scripts/wallpaper-hotplug.sh"     // re-paint wallpaper on monitors that (re)connect after startup (e.g. the flapping HDMI TV)
+// cava spectrum bars, drawn on the GPU: one fullscreen fragment shader per output
+// (wlr-layer-shell, Bottom layer) instead of the Noctalia desktop widget, which
+// cost cairo ~1 core. Source: ~/.local/src/wallpaper-bars-gpu/  Toggle: Mod+B
+spawn-at-startup "bash" "-c" "exec $HOME/.local/bin/wallpaper-bars-gpu >>$HOME/.cache/wallpaper-bars-gpu.log 2>&1"
 spawn-at-startup "wl-paste" "--type" "text" "--watch" "cliphist" "store"
 spawn-at-startup "wl-paste" "--type" "image" "--watch" "cliphist" "store"
 // Night light / blue-light filter. niri implements wlr-gamma-control (since
@@ -278,10 +290,69 @@ window-rule {
 window-rule {
     match app-id="^brave-browser$"
     draw-border-with-background false
+    shadow {
+      on
+    }
+}
+window-rule {
+    match app-id="^brave-origin$"
+    draw-border-with-background false
+    shadow {
+      on
+    }
 }
 window-rule {
     match is-active=false
     opacity 0.95
+    shadow {
+      on
+      softness 4
+      spread 1
+      offset x=0 y=2
+      color "#421f4466"
+      draw-behind-window true
+    }
+}
+// Steam: CEF paints an OPAQUE surface, so unlike kitty/Nautilus the glass has to
+// come from niri's own opacity (there is no app-side alpha to paint into). Keep
+// the fade shallow -- at 0.90 the library text and artwork still read clearly,
+// while the wallpaper shows through enough to blur into a frosted backdrop.
+// draw-border-with-background false is mandatory here: with a translucent window
+// niri would otherwise paint the focus-ring colour as a SOLID slab behind it,
+// which shows through and tints the whole client.
+// The shadow override exists for the same reason -- the global shadow's opaque
+// #421f would read as a red panel inside the glass, so it uses kitty's
+// transparent colour instead.
+// NOTE: Steam also opens its friends list, chat windows and context menus with
+// app-id "steam", so those inherit the same rounding/glass. That is intentional.
+window-rule {
+    match app-id="^steam$"
+    geometry-corner-radius 12
+    clip-to-geometry true
+    opacity 0.95
+    draw-border-with-background false
+    shadow {
+        on
+        softness 38
+        spread 7
+        offset x=0 y=5
+        color "#421f4477"
+        draw-behind-window true
+    }
+    background-effect {
+        blur true
+    }
+}
+// Unfocused Steam: a touch more glass, matching kitty's house pattern (and
+// cancelling the global is-active=false 0.75 dim, which would be too washed out
+// at this UI's text density). One match line so app-id and is-active AND.
+window-rule {
+    match app-id="^steam$" is-active=false
+    opacity 0.90
+    draw-border-with-background false
+    background-effect {
+        blur true
+    }
 }
 // Nautilus: transparency lives in the APP's CSS, not here. niri's window
 // `opacity` fades the ENTIRE surface (text, icons, sidebar included), which is
@@ -317,14 +388,7 @@ window-rule {
 // Inactive kitty: slightly more transparent + frosted than the global inactive rule.
 // Must come AFTER the rule above (later rules override earlier); app-id + is-active
 // share one match line so they AND, not OR.
-window-rule {
-    match app-id="^kitty$" is-active=false
-    opacity 0.70
-    background-effect {
-        blur true
-        //xray false
-    }
-}
+
 
 // ---------------------------------------------------------------------------
 // Keybindings
@@ -334,7 +398,7 @@ binds {
     Mod+Return { spawn "kitty"; }                          // terminal (SUPER+Enter)
     Mod+SPACE { spawn-sh "noctalia msg panel-toggle launcher"; }   // app launcher (Noctalia)
     Mod+E { spawn "nautilus"; }                            // file manager
-    Mod+Shift+S { spawn-sh "bash ~/.config/hypr/scripts/search-selection.sh"; }  // search highlighted text
+    Mod+Shift+S { spawn-sh "bash ~/.config/niri/scripts/search-selection.sh"; }  // search highlighted text
 
     // --- Windows ---
     Mod+Q { close-window; }
@@ -374,8 +438,11 @@ binds {
 
     // --- Column width ---
     Mod+R { switch-preset-column-width; }
-    Mod+Minus { set-column-width "-10%"; }
-    Mod+Equal { set-column-width "+10%"; }
+    Mod+Shift+R { switch-preset-column-width-back; }
+    Mod+Minus { set-column-width "-1%"; }
+    Mod+Shift+Minus { set-column-width "-5%"; }
+    Mod+Shift+Equal { set-column-width "+5%"; }
+    Mod+Equal { set-column-width "+1%"; }
 
     // --- Workspaces ---
     Mod+Shift+J { move-window-to-workspace-down; }   // move window a workspace down
@@ -405,10 +472,16 @@ binds {
     Mod+Shift+E { spawn-sh "noctalia msg panel-toggle session"; }   // logout/power menu
     Mod+N { spawn-sh "noctalia msg panel-toggle control-center notifications"; }   // notifications (Noctalia)
     Mod+Shift+V { spawn-sh "noctalia msg panel-toggle clipboard"; }  // clipboard history
-    Mod+Shift+W { spawn-sh "bash ~/.config/hypr/scripts/random-wallpaper.sh"; }  // force random wallpaper (Tinder "keep")
+    Mod+Shift+W { spawn-sh "bash ~/.config/niri/scripts/random-wallpaper.sh"; }  // force random wallpaper (Tinder "keep")
     Mod+Shift+B { spawn-sh "noctalia msg panel-toggle computing/wallpaper-browser:browser"; }  // browse wallpapers by hand (wallhaven)
-    Mod+Ctrl+Shift+X { spawn-sh "bash ~/.config/hypr/scripts/swipe-delete-wallpaper.sh"; }  // BAN current wallpaper (Tinder "reject") — 4 keys on purpose: Mod+X was too easy to hit by accident
+    Mod+Ctrl+Shift+X { spawn-sh "bash ~/.config/niri/scripts/swipe-delete-wallpaper.sh"; }  // BAN current wallpaper (Tinder "reject") — 4 keys on purpose: Mod+X was too easy to hit by accident
     Mod+Y { spawn-sh "noctalia msg panel-toggle aabidk20/yt-music:panel"; }  // YouTube Music panel (Noctalia plugin)
+
+    // --- Shell / resources ---
+    // Starts/stops the GPU cava bars (wlr-layer-shell renderer, ~1-2% CPU) that
+    // replaced the Noctalia wallpaper-bars widget (~1 core of cairo raster).
+    // Source: ~/.local/src/wallpaper-bars-gpu/  Widget plugin stays disabled.
+    Mod+B { spawn-sh "bash ~/.config/niri/scripts/toggle-wallpaper-bars.sh"; }   // cava bars off/on
 
     // --- Screenshot ---
     // niri's own screenshot UI: drag a region, or click a window/full screen,
@@ -419,7 +492,7 @@ binds {
     Shift+Print { screenshot-window; }                     // focused window, no UI
 
     // --- Screen recording (toggle) ---
-    Mod+Shift+R { spawn-sh "bash ~/.config/hypr/scripts/record-screen.sh"; }  // start/stop recording focused output + desktop audio -> ~/Videos/Recordings
+    Mod+Shift+Ctrl+R { spawn-sh "bash ~/.config/niri/scripts/record-screen.sh"; }  // start/stop recording focused output + desktop audio -> ~/Videos/Recordings
 
     // --- Quit / power ---
     Ctrl+Alt+Delete { quit; }                              // quit (confirmation dialog)

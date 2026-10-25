@@ -5,22 +5,22 @@
 -- inside M.setup() -- not in a one-shot startup hook.
 function M.setup()
   require('base16-colorscheme').setup({
-    base00 = '#291814',
-    base01 = '#452821',
-    base02 = '#3e241e',
-    base03 = '#716561',
-    base04 = '#b6b0af',
+    base00 = '#271618',
+    base01 = '#412528',
+    base02 = '#3b2124',
+    base03 = '#726263',
+    base04 = '#b6afaf',
     base05 = '#f3f2f2',
     base06 = '#f3f2f2',
     base07 = '#f3f2f2',
-    base08 = '#d25a3f',
-    base09 = '#9bdea4',
-    base0A = '#d8b15a',
-    base0B = '#e47e67',
-    base0C = '#96e9a1',
-    base0D = '#eca393',
-    base0E = '#e9cf96',
-    base0F = '#f4e3be',
+    base08 = '#fd4663',
+    base09 = '#cc66aa',
+    base0A = '#d68b5c',
+    base0B = '#e46774',
+    base0C = '#e996cd',
+    base0D = '#ec939c',
+    base0E = '#e9b696',
+    base0F = '#f4d3be',
   })
 
   local hi = function(group, opts)
@@ -53,46 +53,46 @@ function M.setup()
   end
 
   -- Legible comments: base16 maps Comment to base03 (outline), which is dim.
-  hi('Comment', { fg = '#b6b0af', italic = true })
+  hi('Comment', { fg = '#b6afaf', italic = true })
   for _, group in ipairs({ '@comment', '@comment.documentation' }) do
-    hi(group, { fg = '#b6b0af', italic = true })
+    hi(group, { fg = '#b6afaf', italic = true })
   end
 
   -- Selection still needs some tint, or it is invisible on a transparent bg.
-  hi('PmenuSel', { fg = '#f3f2f2', bg = '#3e241e' })
-  hi('PmenuThumb', { bg = '#3e241e' })
-  hi('Visual', { bg = '#3e241e' })
+  hi('PmenuSel', { fg = '#f3f2f2', bg = '#3b2124' })
+  hi('PmenuThumb', { bg = '#3b2124' })
+  hi('Visual', { bg = '#3b2124' })
 
   -- telescope.nvim (titles keep a filled background on purpose -- they are chips)
   hi('TelescopeNormal',         { fg = '#f3f2f2' })
-  hi('TelescopeBorder',         { fg = '#716561' })
+  hi('TelescopeBorder',         { fg = '#726263' })
   hi('TelescopePromptNormal',   { fg = '#f3f2f2' })
-  hi('TelescopePromptBorder',   { fg = '#716561' })
-  hi('TelescopePromptPrefix',   { fg = '#e47e67' })
-  hi('TelescopePromptCounter',  { fg = '#b6b0af' })
-  hi('TelescopePromptTitle',    { fg = '#291814',             bg = '#e47e67' })
-  hi('TelescopePreviewTitle',   { fg = '#291814',             bg = '#d8b15a' })
-  hi('TelescopeResultsTitle',   { fg = '#291814',             bg = '#9bdea4' })
-  hi('TelescopeSelection',      { fg = '#f3f2f2',          bg = '#3e241e' })
-  hi('TelescopeSelectionCaret', { fg = '#e47e67',             bg = '#3e241e' })
-  hi('TelescopeMatching',       { fg = '#e47e67',             bold = true })
+  hi('TelescopePromptBorder',   { fg = '#726263' })
+  hi('TelescopePromptPrefix',   { fg = '#e46774' })
+  hi('TelescopePromptCounter',  { fg = '#b6afaf' })
+  hi('TelescopePromptTitle',    { fg = '#271618',             bg = '#e46774' })
+  hi('TelescopePreviewTitle',   { fg = '#271618',             bg = '#d68b5c' })
+  hi('TelescopeResultsTitle',   { fg = '#271618',             bg = '#cc66aa' })
+  hi('TelescopeSelection',      { fg = '#f3f2f2',          bg = '#3b2124' })
+  hi('TelescopeSelectionCaret', { fg = '#e46774',             bg = '#3b2124' })
+  hi('TelescopeMatching',       { fg = '#e46774',             bold = true })
 
   -- mini.pick
   hi('MiniPickNormal',         { fg = '#f3f2f2' })
-  hi('MiniPickBorder',         { fg = '#716561' })
+  hi('MiniPickBorder',         { fg = '#726263' })
   hi('MiniPickPrompt',         { fg = '#f3f2f2' })
-  hi('MiniPickPromptPrefix',   { fg = '#e47e67' })
-  hi('MiniPickBorderText',     { fg = '#291814',             bg = '#e47e67' })
-  hi('MiniPickMatchCurrent',   { fg = '#f3f2f2',          bg = '#3e241e' })
-  hi('MiniPickPromptCaret',    { fg = '#e47e67',             bg = '#3e241e' })
-  hi('MiniPickMatchRanges',    { fg = '#e47e67',             bold = true })
+  hi('MiniPickPromptPrefix',   { fg = '#e46774' })
+  hi('MiniPickBorderText',     { fg = '#271618',             bg = '#e46774' })
+  hi('MiniPickMatchCurrent',   { fg = '#f3f2f2',          bg = '#3b2124' })
+  hi('MiniPickPromptCaret',    { fg = '#e46774',             bg = '#3b2124' })
+  hi('MiniPickMatchRanges',    { fg = '#e46774',             bold = true })
 
   -- Anything the previous colorscheme left behind (nvim-cmp / blink.cmp menus
   -- are not defined by base16-nvim, so their old opaque fills survive).
   for name, hl in pairs(vim.api.nvim_get_hl(0, { link = true })) do
     if not hl.link and (name:match('^Cmp') or name:match('^BlinkCmp')) then
       hl.bg = (name:match('Selection$') or name:match('Thumb$'))
-          and '#3e241e' or nil
+          and '#3b2124' or nil
       hl.ctermbg = nil
       hi(name, hl)
     end

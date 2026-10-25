@@ -149,13 +149,12 @@ tuigreet package update, rebuild with `TUIGREET_TAG=<new version>`.
 Each top-level directory is a package mirroring onto `$HOME`.
 
 ```
-niri/              .config/niri            config.kdl · animations/ · focus-ring.kdl · noctalia.kdl
+niri/              .config/niri            config.kdl · animations/ · focus-ring.kdl · noctalia.kdl · scripts/
 noctalia/          .config/noctalia        bar.toml · backdrop.toml · templates/ · scripts/
 noctalia-plugins/  .config/noctalia-v5-plugins   seven Luau plugins
 noctalia-state/    settings.toml template  plugin enablement, desktop widgets
 matugen/           .config/matugen         palette templates (kitty, nvim, lock)
 kitty/  alacritty/  ghostty/               terminal configs
-hypr/              .config/hypr            wallpaper, screenshot and recording helpers niri calls
 backgrounds/       .config/backgrounds     wallpapers
 tuigreet/          .config/tuigreet        login screen theme
 tuigreet-patch/    matrix-peak.patch       patches tuigreet with the rainbow
@@ -172,11 +171,11 @@ packages.txt  aur-packages.txt   what the installer installs
 bootstrap.sh                     the curl one-liner
 ```
 
-`hypr/` is not a Hyprland config despite the name — it is the helper package niri
-spawns (`start-wallpaper-one.sh`, `wallpaper-hotplug.sh`, `record-screen.sh`, the
-CRT shaders), reached through `~/.config/hypr/`. `system/` is the only package that
-needs root. `i3/`, `polybar/`, `picom/`, `xresources/`, `screenlayout/` and
-`revclock/` are optional extras you can prune.
+The helper scripts niri spawns (`apply-wallpaper.sh`, `start-wallpaper-one.sh`,
+`wallpaper-hotplug.sh`, `record-screen.sh`, `search-selection.sh`, …) live in
+`niri/.config/niri/scripts/` and are reached through `~/.config/niri/scripts/`.
+`system/` is the only package that needs root. `i3/`, `polybar/`, `picom/`,
+`xresources/`, `screenlayout/` and `revclock/` are optional extras you can prune.
 
 ---
 

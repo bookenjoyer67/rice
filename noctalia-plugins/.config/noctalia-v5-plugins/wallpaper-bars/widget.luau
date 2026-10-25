@@ -2,9 +2,11 @@
 -- wallpaper-bars desktop widget.
 --
 -- One ui.box per spectrum band, bottom-aligned, tinted with the wallpaper
--- colour the service sampled behind that bar. Bars are frame-ticked and
--- smoothed, and the tick loop shuts itself off when the music stops (the
--- service's level feed wakes it again), so an idle desktop costs nothing.
+-- colour the service sampled behind that bar. With `blur` on, each bar is a
+-- nested stack of translucent capsules so it melts into coloured mist. Bars
+-- are frame-ticked and smoothed, and the tick loop shuts itself off when the
+-- music stops (the service's level feed wakes it again), so an idle desktop
+-- costs nothing.
 
 local function num(v, d)
   local n = tonumber(v)
@@ -14,7 +16,7 @@ local function num(v, d)
   return n
 end
 
-local N = math.clamp(math.floor(num(noctalia.getConfig("bands"), 64)), 8, 128)
+local N = math.clamp(math.floor(num(noctalia.getConfig("bands"), 128)), 8, 512)
 local W = math.max(40, num(noctalia.getConfig("width"), 1360))
 local H = math.max(20, num(noctalia.getConfig("height"), 768))
 local GAP = math.max(0, num(noctalia.getConfig("gap"), 3))
@@ -25,7 +27,8 @@ local MONITOR = noctalia.getConfig("monitor") or ""
 local BRIGHT = math.clamp(num(noctalia.getConfig("brightness"), 0.22), 0, 1)
 local SAT = math.clamp(num(noctalia.getConfig("saturation"), 1.35), 0, 3)
 local MIN_LIGHT = math.clamp(num(noctalia.getConfig("min_light"), 0.40), 0, 1)
-local ALPHA = math.clamp(num(noctalia.getConfig("bar_opacity"), 0.92), 0.05, 1)
+local ALPHA = math.clamp(num(noctalia.getConfig("bar_opacity"), 0.75), 0.05, 1)
+local BLUR = math.clamp(num(noctalia.getConfig("blur"), 1.0), 0, 1)
 local SMOOTH_MS = math.max(0, num(noctalia.getConfig("smoothing"), 45))
 local FADE = noctalia.getConfig("fade_when_idle") ~= false
 local IDLE_MS = math.max(1, num(noctalia.getConfig("idle_seconds"), 6)) * 1000
@@ -34,6 +37,46 @@ local MIN_BAR = math.max(2, H * 0.004)
 local BAR_W = math.max(1, (W - GAP * (N - 1)) / N)
 local BAR_R = math.min(RADIUS, BAR_W / 2)
 local ALPHA_HEX = string.format("%02x", math.floor(ALPHA * 255 + 0.5))
+
+-- "Blur" is a simulated glow: ui.box has no gaussian blur, so each bar is a
+-- nested stack of translucent capsules, faintest and widest on the outside.
+-- One slider controls how narrow the solid core gets and how far the mist
+-- reaches past the tip.
+local BLUR_ON = BLUR > 0.01
+local LAYERS = BLUR_ON and math.floor(4 + BLUR * 6) or 0
+local CORE_FRAC = 0.45 - 0.32 * BLUR
+local CORE_W = math.max(1, BAR_W * CORE_FRAC)
+local CORE_R = math.min(RADIUS, CORE_W / 2)
+local HALO_EXTRA = BLUR_ON and BAR_W * 1.5 * BLUR or 0
+local HALO_W = BAR_W + 2 * HALO_EXTRA
+local VSPREAD = BLUR_ON and H * 0.09 * BLUR or 0
+local BAR_MAX = math.max(MIN_BAR, H - VSPREAD)
+local CORE_ALPHA = ALPHA * (1 - 0.45 * BLUR)
+local CORE_ALPHA_HEX = string.format("%02x", math.floor(CORE_ALPHA * 255 + 0.5))
+
+local LAYER_W = {}
+local LAYER_DH = {}
+local LAYER_R = {}
+local LAYER_ALPHA_HEX = {}
+if BLUR_ON then
+  -- Target visible alpha at each ring, core outward. Solving each layer's own
+  -- alpha from it keeps the falloff smooth instead of banded at the edge.
+  local profile = {}
+  for j = 0, LAYERS do
+    local t = j / LAYERS
+    profile[j] = CORE_ALPHA * math.exp(-4.0 * t * t)
+  end
+  for j = 1, LAYERS do
+    local t = j / LAYERS
+    local w = CORE_W + (HALO_W - CORE_W) * t
+    LAYER_W[j] = w
+    LAYER_DH[j] = VSPREAD * t ^ 1.3
+    LAYER_R[j] = math.min(CORE_R + (HALO_W / 2 - CORE_R) * t, w / 2)
+    local pnext = profile[j + 1] or 0
+    local a = (profile[j] - pnext) / (1 - pnext)
+    LAYER_ALPHA_HEX[j] = string.format("%02x", math.floor(a * 255 + 0.5))
+  end
+end
 
 local levels = {}
 local targets = {}
@@ -105,8 +148,8 @@ local function tint(rgb)
     v = MIN_LIGHT
   end
   r, g, b = hsvToRgb(h, s, v)
-  return string.format("#%02x%02x%02x%s", math.floor(r * 255 + 0.5), math.floor(g * 255 + 0.5),
-    math.floor(b * 255 + 0.5), ALPHA_HEX)
+  return string.format("#%02x%02x%02x", math.floor(r * 255 + 0.5), math.floor(g * 255 + 0.5),
+    math.floor(b * 255 + 0.5))
 end
 
 local FALLBACK = { "#8fd6ff", "#a9b8ff", "#d0b3ff", "#ffc6e0" }
@@ -119,7 +162,7 @@ local colorCache = {}
 local function barColor(i, level)
   if grid == nil or type(grid.data) ~= "table" then
     fallbackI = fallbackI % #FALLBACK + 1
-    return FALLBACK[fallbackI] .. ALPHA_HEX
+    return FALLBACK[fallbackI]
   end
   local rows = tonumber(grid.rows) or 1
   local cols = tonumber(grid.cols) or N
@@ -147,20 +190,65 @@ local function barColor(i, level)
   end
 
   local rgb = tonumber(grid.data[(row - 1) * cols + col])
-  local hex = rgb ~= nil and tint(rgb) or (FALLBACK[1] .. ALPHA_HEX)
+  local hex = rgb ~= nil and tint(rgb) or FALLBACK[1]
   colorCache[i] = { key = key, hex = hex }
   return hex
 end
 
 -- ---------------------------------------------------------------- render
 
+local BAR_SPAN = math.max(0, BAR_MAX - MIN_BAR)
 local lastHeights = {}
 local lastOpacity = -1
+
+local function barNode(i, h, level)
+  local color = barColor(i, level)
+  if not BLUR_ON then
+    return ui.box({
+      key = "b" .. i,
+      width = BAR_W,
+      height = h,
+      radius = BAR_R,
+      fill = color .. ALPHA_HEX,
+    })
+  end
+
+  local node = ui.box({
+    key = "b" .. i .. "l0",
+    width = CORE_W,
+    height = h,
+    radius = CORE_R,
+    fill = color .. CORE_ALPHA_HEX,
+  })
+  -- A quiet band gets a small halo, a loud one the full spread.
+  local reach = 0.2 + 0.8 * level
+  for j = 1, LAYERS do
+    node = ui.column({
+      key = "b" .. i .. "l" .. j,
+      width = LAYER_W[j],
+      height = h + LAYER_DH[j] * reach,
+      radius = LAYER_R[j],
+      fill = color .. LAYER_ALPHA_HEX[j],
+      align = "center",
+      justify = "end",
+    }, { node })
+  end
+  -- The wrapper reserves exactly one band slot; the halo is allowed to spill
+  -- over the gaps and into neighbouring slots, which is what turns separate
+  -- bars into a continuous mist.
+  return ui.column({
+    key = "b" .. i .. "w",
+    width = BAR_W,
+    height = H,
+    align = "center",
+    justify = "end",
+  }, { node })
+end
 
 local function render(force)
   local changed = force == true or math.abs(opacity - lastOpacity) > 0.002
   for i = 1, N do
-    local h = MIN_BAR + (levels[i] or 0) * (H - MIN_BAR)
+    local h = MIN_BAR + (levels[i] or 0) * BAR_SPAN
     if math.abs(h - (lastHeights[i] or -1)) > 0.5 then
       changed = true
     end
@@ -173,14 +261,7 @@ local function render(force)
 
   local kids = {}
   for i = 1, N do
-    local h = lastHeights[i]
-    kids[i] = ui.box({
-      key = "b" .. i,
-      width = BAR_W,
-      height = h,
-      radius = BAR_R,
-      fill = barColor(i, (h - MIN_BAR) / (H - MIN_BAR)),
-    })
+    kids[i] = barNode(i, lastHeights[i], levels[i] or 0)
   end
   desktopWidget.render(ui.row({
     width = W,
@@ -215,8 +296,18 @@ noctalia.state.watch("levels", function(value)
   if type(value) ~= "table" then
     return
   end
+  -- One cava feeds every widget, so a widget whose own band count differs from
+  -- the feed (a per-instance override, a stale pin) must spread itself over the
+  -- whole spectrum instead of reading the first feed bands and going dead past
+  -- them. Feed == N is the normal case and maps 1:1.
+  local feed = #value
+  local spread = feed > 0 and feed ~= N
   for i = 1, N do
-    local v = tonumber(value[i])
+    local src = i
+    if spread then
+      src = math.clamp(math.floor((i - 0.5) / N * feed) + 1, 1, feed)
+    end
+    local v = tonumber(value[src])
     targets[i] = v and math.clamp(v, 0, 1) or 0
   end
   if maxOf(targets) > 0.002 then
@@ -296,7 +387,7 @@ end
 
 -- seed the first frame (grids may still be empty for a moment)
 grid = pickGrid(noctalia.state.get("grids"))
-noctalia.log(string.format("wallpaper-bars: canvas %dx%d monitor='%s' grid=%s", W, H, MONITOR,
+noctalia.log(string.format("wallpaper-bars: canvas %dx%d bands=%d gap=%.1f monitor='%s' grid=%s", W, H, N, GAP, MONITOR,
   grid and (tostring(grid.cols) .. "x" .. tostring(grid.rows)) or "none"))
 render(true)
 setTicking(true)
