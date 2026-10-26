@@ -2,6 +2,8 @@
 
 local HOME = noctalia.getenv("HOME") or ""
 local SCRIPT = HOME .. "/.local/bin/deepseek_price.sh"
+local OPENER = HOME .. "/.config/noctalia-v5-plugins/desktop-essentials/open-url.sh"
+local REFILL_URL = "https://platform.deepseek.com/top_up"
 local REFRESH_SECONDS = 60
 
 local period, price, timeLeft, balance = "Waiting...", "...", "...", ""
@@ -28,6 +30,22 @@ local function render()
         fontWeight = "bold",
         color = "primary",
         onClick = "onDeepseekClick",
+      }),
+      ui.button({
+        key = "refill",
+        glyph = "cash-plus",
+        text = "Refill",
+        glyphSize = 12,
+        fontSize = 11,
+        variant = "ghost",
+        controlSize = "sm",
+        onClick = function()
+          noctalia.runAsync({ "bash", OPENER, REFILL_URL }, function(result)
+            if result ~= nil and result.exitCode ~= 0 then
+              noctalia.notifyError("DeepSeek: cannot open browser", tostring(result.stderr or ""):sub(1, 200))
+            end
+          end)
+        end,
       }),
     }),
   }))

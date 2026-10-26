@@ -129,7 +129,6 @@ hotkey-overlay {
     skip-at-startup
 }
 
-spawn-at-startup "nm-applet"
 spawn-at-startup "sh" "-c" "LD_PRELOAD=\"$HOME/.local/lib/noctalia-layer-swap.so\" exec noctalia"
 spawn-at-startup "bash" "-c" "$HOME/.config/niri/scripts/start-wallpaper-one.sh"   // awww daemon + re-paint the CURRENT wallpaper at startup (no new image; rotation DISABLED, user switches manually)
 spawn-at-startup "bash" "-c" "$HOME/.config/niri/scripts/wallpaper-hotplug.sh"     // re-paint wallpaper on monitors that (re)connect after startup (e.g. the flapping HDMI TV)
@@ -144,10 +143,6 @@ window-rule {
 }
 window-rule {
     match app-id="^pavucontrol$"
-    open-floating true
-}
-window-rule {
-    match app-id="^blueman-manager$"
     open-floating true
 }
 window-rule {

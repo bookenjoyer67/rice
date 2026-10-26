@@ -5,7 +5,12 @@ DER="$(cd "$(dirname "$(readlink -f "$0")")" && pwd)"
 . "$DER/read-settings.sh"
 ws_apply
 
-CACHE_DIR="$HOME/.cache/wallpaper"
+# Overridable so a consumer that only wants an image (e.g. wallhaven-ntp for
+# Brave's new tab page) does NOT clobber the DESKTOP wallpaper, current.id,
+# history or reject list -- otherwise the desktop keeps showing image A while
+# every reader of this cache (bars, hotplug healer, swipe-delete) sees image B.
+CACHE_DIR="${WALLPAPER_CACHE_DIR:-$HOME/.cache/wallpaper}"
+mkdir -p "$CACHE_DIR"
 REJECTED="$CACHE_DIR/rejected"
 RECENT="$CACHE_DIR/recent"
 STATE_ID="$CACHE_DIR/current.id"
