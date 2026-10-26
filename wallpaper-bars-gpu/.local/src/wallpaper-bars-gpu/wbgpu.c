@@ -1,4 +1,19 @@
-
+/*
+ * wallpaper-bars-gpu -- cava spectrum bars drawn on the GPU.
+ *
+ * A wlr-layer-shell surface per output, fullscreen, on the Bottom layer, that
+ * runs ONE fullscreen fragment shader: bar geometry, rounded corners, glow
+ * falloff and the wallpaper-sampled colours are all computed per pixel on the
+ * GPU. The CPU only feeds 128 smoothed levels and, when the wallpaper changes,
+ * one texture upload.
+ *
+ * Replaces the Noctalia desktop widget `computing/wallpaper-bars`, whose ~1400
+ * translucent ui.box nodes per output cost cairo ~1 core of CPU raster time.
+ *
+ *   cava (raw 0..1000 ascii) --> levels texture --> shader --> layer surface
+ *
+ * Build: make        Install: make install
+ */
 #define _GNU_SOURCE
 #include <stdio.h>
 #include <stdarg.h>
@@ -27,23 +42,59 @@
 #define WALL_TEX_W 1024
 #define WALL_TEX_H 576
 
+/* ------------------------------------------------------------------ config */
+
 static int    cfg_bands      = 128;
-static int    cfg_feed       = 128;
+static int    cfg_feed       = 128;    /* bands cava delivers                */
 static double cfg_gap        = 1.5;
 static double cfg_radius     = 4.0;
-static double cfg_opacity    = 0.22;
-static double cfg_blur       = 1.0;
-static double cfg_smooth_ms  = 165.0;
+static double cfg_opacity    = 0.22;   /* widget bar_opacity                 */
+static double cfg_blur       = 1.0;    /* widget blur -> halo layer count    */
+static double cfg_smooth_ms  = 165.0;  /* widget smoothing                   */
 static double cfg_idle_ms    = 6000.0;
-static double cfg_sat        = 2.8;
-static double cfg_lift       = 0.18;
-static double cfg_minlight   = 0.40;
-static char   cfg_settings[PATH_MAX];
-static char   cfg_cava_conf[PATH_MAX];
+static double cfg_sat        = 2.8;    /* widget saturation                  */
+static double cfg_lift       = 0.18;   /* widget brightness                  */
+static double cfg_minlight   = 0.40;   /* widget min_light                   */
+static int    cfg_color_mode = 0;      /* 0 tip, 1 body, 2 floor             */
+static char   cfg_audio_source[160] = "auto";
+static int    cfg_fps        = 60;
+static char   cfg_config[PATH_MAX];    /* config.toml: the single source of truth */
+static char   cfg_settings[PATH_MAX];  /* legacy noctalia settings.toml (migration only) */
+static char   cfg_cava_conf[PATH_MAX]; /* generated from cfg_config */
 static char   cfg_wallpaper[PATH_MAX];
 static char   cfg_only_output[64];
 static int    cfg_demo;
+static int    cfg_init_only;           /* --init-config: write the file, exit */
+static int    cfg_cava_explicit;       /* --cava-conf given: do not generate  */
+static int    cfg_wall_explicit;
 
+/* command-line overrides, re-applied AFTER the config file so an explicit
+ * flag still wins (handy for one-off previews); a flag is not written back. */
+#define OV_BANDS  0x001
+#define OV_FEED   0x002
+#define OV_GAP    0x004
+#define OV_RADIUS 0x008
+#define OV_OPAC   0x010
+#define OV_BLUR   0x020
+#define OV_SMOOTH 0x040
+#define OV_IDLE   0x080
+#define OV_SAT    0x100
+#define OV_LIFT   0x200
+#define OV_MINL   0x400
+#define OV_FPS    0x800
+#define OV_MODE   0x1000
+#define CFG_MAX_OUT 16
+static char   map_out[CFG_MAX_OUT][64];
+static int    map_bands[CFG_MAX_OUT];
+static int    map_n;
+static time_t cfg_stamp = -1;
+static int    feed_dirty;
+
+static unsigned ov_mask;
+static double   ov_bands, ov_feed, ov_gap, ov_radius, ov_opac, ov_blur,
+                ov_smooth, ov_idle, ov_sat, ov_lift, ov_minl, ov_fps, ov_mode;
+
+static int  mode_from_str(const char *s);
 static void logmsg(const char *fmt, ...) __attribute__((format(printf, 1, 2)));
 static void logmsg(const char *fmt, ...)
 {
@@ -62,6 +113,8 @@ static double now_ms(void)
     return ts.tv_sec * 1000.0 + ts.tv_nsec / 1e6;
 }
 
+/* -------------------------------------------------------------- wayland */
+
 static struct wl_display *wl_dpy;
 static struct wl_registry *wl_reg;
 static struct wl_compositor *wl_comp;
@@ -74,7 +127,7 @@ static EGLConfig  egl_cfg;
 static GLuint prog, vao;
 static GLuint tex_levels, tex_wall;
 static GLint u_res, u_levels, u_wall, u_n, u_feed, u_gap, u_radius, u_fade;
-static GLint u_opacity, u_blur, u_layers, u_sat, u_lift, u_minlight;
+static GLint u_opacity, u_blur, u_layers, u_sat, u_lift, u_minlight, u_mode;
 static int ge_ready;
 
 struct output {
@@ -85,14 +138,17 @@ struct output {
     struct zwlr_layer_surface_v1 *ls;
     struct wl_egl_window *win;
     EGLSurface esurf;
+    struct wl_callback *frame_cb;   /* frame in flight, NULL = free to draw */
     int configured;
-    int bands;
+    int bands;              /* 0 = unknown, resolved at render time */
     struct output *next;
 };
 
 static struct output *outputs;
 
-static int bands_for_output(const char *name);
+static int bands_for_output(const char *name);   /* settings.toml, defined below */
+
+/* --------------------------------------------------------------- shaders */
 
 static const char *VS_SRC =
     "#version 300 es\n"
@@ -105,19 +161,20 @@ static const char *FS_SRC =
     "#version 300 es\n"
     "precision highp float;\n"
     "uniform vec2  u_res;\n"
-    "uniform sampler2D u_levels;\n"
+    "uniform sampler2D u_levels;   // feed-width levels (r = 0..1)\n"
     "uniform sampler2D u_wall;\n"
-    "uniform int   u_n;\n"
-    "uniform int   u_feed;\n"
+    "uniform int   u_n;            // bands on THIS output (widget setting)\n"
+    "uniform int   u_feed;         // bands in the cava feed\n"
     "uniform float u_gap;\n"
     "uniform float u_radius;\n"
-    "uniform float u_blur;\n"
-    "uniform float u_opacity;\n"
+    "uniform float u_blur;         // widget \"blur\" 0..1 -> halo layers\n"
+    "uniform float u_opacity;      // widget bar_opacity\n"
     "uniform float u_sat;\n"
     "uniform float u_lift;\n"
     "uniform float u_minlight;\n"
     "uniform float u_fade;\n"
     "uniform int   u_layers;\n"
+    "uniform int   u_mode;         // 0 tip, 1 body, 2 floor\n"
     "out vec4 fragColor;\n"
     "\n"
     "vec3 rgb2hsv(vec3 c) {\n"
@@ -201,7 +258,10 @@ static const char *FS_SRC =
     "  float alpha = (1.0 - trans) * u_fade;\n"
     "\n"
     "  /* ---- colour: wallpaper pixel behind this bar's tip, tinted like the widget ---- */\n"
-    "  vec2 walluv = vec2((idx + 0.5) / float(u_n), clamp(1.0 - lvl, 0.0, 1.0));\n"
+    "  /* colour_mode: tip follows the bar top, body the middle of the bar,\n"
+    "   * floor the bottom edge -- the three rows the old widget sampled. */\n"
+    "  float wy = (u_mode == 2) ? 0.0 : ((u_mode == 1) ? 1.0 - lvl * 0.5 : 1.0 - lvl);\n"
+    "  vec2 walluv = vec2((idx + 0.5) / float(u_n), clamp(wy, 0.0, 1.0));\n"
     "  vec3 col = texture(u_wall, walluv).rgb;\n"
     "  vec3 hsv = rgb2hsv(col);\n"
     "  hsv.y = clamp(hsv.y * u_sat, 0.0, 1.0);\n"
@@ -262,6 +322,7 @@ static void gpu_init(void)
     u_sat      = glGetUniformLocation(prog, "u_sat");
     u_lift     = glGetUniformLocation(prog, "u_lift");
     u_minlight = glGetUniformLocation(prog, "u_minlight");
+    u_mode     = glGetUniformLocation(prog, "u_mode");
 
     glGenVertexArrays(1, &vao);
 
@@ -284,6 +345,8 @@ static void gpu_init(void)
 
     ge_ready = 1;
 }
+
+/* ------------------------------------------------------------- wallpaper */
 
 static time_t wall_mtime = -1;
 
@@ -315,6 +378,9 @@ static int read_fd_all(int fd, unsigned char **out, size_t *outlen)
     return 0;
 }
 
+/* Decode the wallpaper to a small RGBA buffer with magick (a dependency the
+ * old plugin already required) and upload it. Sampled in the shader, so the
+ * on-GPU texture can be small without visible loss. */
 static void wallpaper_reload(void)
 {
     char resolved[PATH_MAX];
@@ -365,6 +431,8 @@ static void wallpaper_reload(void)
     logmsg("wallpaper loaded: %s", resolved);
 }
 
+/* ------------------------------------------------------------------ cava */
+
 static int cava_fd = -1;
 static pid_t cava_pid = -1;
 
@@ -396,6 +464,7 @@ static void cava_spawn(void)
 static float targets[1024];
 static float levels[1024];
 
+/* raw ascii cava: "12;34;56;...;\n", values 0..1000 */
 static void cava_parse_line(char *line, int len)
 {
     int got = 0;
@@ -421,12 +490,12 @@ static void cava_parse_line(char *line, int len)
     }
     if (got == 0)
         return;
-
-    if (got != cfg_bands) {
+    /* resample the feed onto the cava feed width (levels texture width) */
+    if (got != cfg_feed) {
         float src[1024];
         memcpy(src, targets, sizeof(float) * (size_t)got);
-        for (int i = 0; i < cfg_bands; i++) {
-            int s = (int)(((i + 0.5) / cfg_bands) * got);
+        for (int i = 0; i < cfg_feed; i++) {
+            int s = (int)(((i + 0.5) / cfg_feed) * got);
             if (s < 0) s = 0;
             if (s >= got) s = got - 1;
             targets[i] = src[s];
@@ -437,6 +506,7 @@ static void cava_parse_line(char *line, int len)
 static char cava_buf[1 << 16];
 static size_t cava_buflen;
 
+/* returns number of complete lines consumed */
 static int cava_pump(void)
 {
     int lines = 0;
@@ -447,7 +517,7 @@ static int cava_pump(void)
         if (n < 0) {
             if (errno == EINTR)
                 continue;
-            break;
+            break; /* EAGAIN: nothing more pending */
         }
         if (n == 0)
             break;
@@ -468,6 +538,8 @@ static int cava_pump(void)
     }
     return lines;
 }
+
+/* --------------------------------------------------------------- surfaces */
 
 static void render(struct output *o);
 
@@ -524,7 +596,7 @@ static void create_surface(struct output *o)
     o->surf = wl_compositor_create_surface(wl_comp);
     if (!o->surf)
         return;
-
+    /* click-through: an empty input region means the layer never eats input */
     struct wl_region *empty = wl_compositor_create_region(wl_comp);
     wl_surface_set_input_region(o->surf, empty);
     wl_region_destroy(empty);
@@ -542,6 +614,8 @@ static void create_surface(struct output *o)
     zwlr_layer_surface_v1_add_listener(o->ls, &ls_listener, o);
     wl_surface_commit(o->surf);
 }
+
+/* ------------------------------------------------------------------ input */
 
 static void out_geometry(void *data, struct wl_output *wl, int32_t x, int32_t y,
                          int32_t pw, int32_t ph, int32_t subpixel,
@@ -611,12 +685,32 @@ static const struct wl_registry_listener reg_listener = {
     .global_remove = reg_remove,
 };
 
+/* ------------------------------------------------------------------- draw */
+
 static float fade = 1.0f;
 static double idle_acc, fade_target = 1.0;
+static int redraw_req;   /* a frame callback returned: draw with fresh data */
+
+static void frame_done(void *data, struct wl_callback *cb, uint32_t t)
+{
+    (void)t;
+    struct output *o = data;
+    wl_callback_destroy(cb);
+    o->frame_cb = NULL;
+    redraw_req = 1;
+}
+
+static const struct wl_callback_listener frame_cb_listener = { .done = frame_done };
 
 static void render(struct output *o)
 {
     if (!ge_ready || !o->configured || !o->esurf)
+        return;
+    /* One frame in flight per output. Without this, a surface the compositor
+     * is not presenting (covered by a fullscreen video, or its output busy)
+     * never gets its buffer back and eglSwapBuffers blocks for ~1s, which
+     * serialises the whole loop and leaves the bars a second behind the audio. */
+    if (o->frame_cb)
         return;
     if (eglMakeCurrent(egl_dpy, o->esurf, o->esurf, egl_ctx) == EGL_FALSE) {
         logmsg("%s: eglMakeCurrent failed (0x%x)", o->name, eglGetError());
@@ -634,7 +728,7 @@ static void render(struct output *o)
     glClear(GL_COLOR_BUFFER_BIT);
 
     glEnable(GL_BLEND);
-    glBlendFunc(GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
+    glBlendFunc(GL_ONE, GL_ONE_MINUS_SRC_ALPHA); /* premultiplied */
     glUseProgram(prog);
     glBindVertexArray(vao);
 
@@ -647,12 +741,22 @@ static void render(struct output *o)
     glUniform1f(u_opacity, (float)cfg_opacity);
     glUniform1f(u_blur, (float)cfg_blur);
     glUniform1i(u_layers, (int)(4.0 + 6.0 * cfg_blur));
+    glUniform1i(u_mode, cfg_color_mode);
     glUniform1f(u_sat, (float)cfg_sat);
     glUniform1f(u_lift, (float)cfg_lift);
     glUniform1f(u_minlight, (float)cfg_minlight);
 
     glActiveTexture(GL_TEXTURE0);
     glBindTexture(GL_TEXTURE_2D, tex_levels);
+    if (feed_dirty) {
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_R32F, cfg_feed, 1, 0, GL_RED, GL_FLOAT, NULL);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+        feed_dirty = 0;
+        logmsg("levels texture resized to %d bands", cfg_feed);
+    }
     glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, cfg_feed, 1, GL_RED, GL_FLOAT, levels);
     glUniform1i(u_levels, 0);
 
@@ -675,9 +779,9 @@ static void render(struct output *o)
         }
         logmsg("%s: selftest row A>25 -> %d bands, widest run %d px, width %d",
                o->name, runs, maxrun, w);
-
+        /* glow / tip profile at the middle of the widest band */
         int nb = o->bands > 0 ? o->bands : cfg_bands;
-        int cx = (int)((nb / 2 + 0.5) * (double)w / nb);
+        int cx = (int)((nb / 2 + 0.5) * (double)w / nb);   /* centre of one bar, not a gap */
         for (int y = 0; y < h; y += h / 12) {
             unsigned char px[4] = {0};
             glReadPixels(cx, y, 1, 1, GL_RGBA, GL_UNSIGNED_BYTE, px);
@@ -692,6 +796,10 @@ static void render(struct output *o)
         logmsg("%s: readback bottom-centre rgba=%u,%u,%u,%u  err=0x%x",
                o->name, px[0], px[1], px[2], px[3], glGetError());
     }
+    /* ask for the presentation callback BEFORE the commit inside swap;
+     * while it is outstanding this output is skipped (see render()) */
+    o->frame_cb = wl_surface_frame(o->surf);
+    wl_callback_add_listener(o->frame_cb, &frame_cb_listener, o);
     eglSwapBuffers(egl_dpy, o->esurf);
 }
 
@@ -701,34 +809,62 @@ static void render_all(void)
         render(o);
 }
 
+/* ------------------------------------------------------------------- main */
+
 static void usage(const char *argv0)
 {
     printf("usage: %s [options]\n"
-           "  --bands N          bars across the screen (default: per-output widget setting)\n"
-           "  --gap PX           gap between bars (default 1.5)\n"
-           "  --radius PX        bar corner radius (default 4)\n"
-           "  --opacity F        peak bar opacity (default: settings.toml bar_opacity)\n"
-           "  --blur F           halo strength 0..1, the widget's blur (default 1.0)\n"
-           "  --smooth MS        level smoothing time constant (default 45)\n"
-           "  --idle MS          fade out after this much silence (default 6000)\n"
-           "  --cava-conf PATH   cava config (default $XDG_CONFIG_HOME/wallpaper-bars-gpu/cava.conf)\n"
-           "  --wallpaper PATH   wallpaper image (default ~/.config/backgrounds/current-wallpaper)\n"
-           "  --output NAME      only draw on this connector (default: every output)\n"
+           "\n"
+           "  Everything the bars look like lives in\n"
+           "    $XDG_CONFIG_HOME/wallpaper-bars-gpu/config.toml\n"
+           "  which the running surface reloads live. Edit it with\n"
+           "  `wallpaper-bars-config` (a visual editor with a live preview).\n"
+           "  The flags below are one-shot overrides for testing -- they are\n"
+           "  NOT written back to the config file.\n"
+           "\n"
+           "  --config PATH      config file (default $XDG_CONFIG_HOME/wallpaper-bars-gpu/config.toml)\n"
+           "  --init-config      write the config file from the defaults (or from\n"
+           "                     the legacy Noctalia settings) and exit\n"
+           "  --bands N          bars across the screen (default: [bar].bands)\n"
+           "  --feed N           cava spectrum width (default: [audio].bands)\n"
+           "  --gap PX           gap between bars\n"
+           "  --radius PX        bar corner radius\n"
+           "  --opacity F        peak bar opacity\n"
+           "  --blur F           halo strength 0..1\n"
+           "  --smooth MS        level smoothing time constant\n"
+           "  --idle MS          fade out after this much silence\n"
            "  --saturation F     saturation boost on the sampled wallpaper px\n"
            "  --lift F           lift the sampled colour toward white\n"
            "  --min-light F      floor on the sampled colour value\n"
+           "  --fps N            cava frame rate\n"
+           "  --color-mode M     tip | body | floor\n"
+           "  --cava-conf PATH   use this cava config instead of generating one\n"
+           "  --wallpaper PATH   wallpaper image (default: [wallpaper].path)\n"
+           "  --output NAME      only draw on this connector (default: every output)\n"
            "  --demo             synthesize levels instead of reading cava (visual test)\n"
-           "  --help\n", argv0);
+           "  --help\n"
+           "\n"
+           "  WBGPU_SELFTEST=1 reads the frame back once and prints the band profile.\n",
+           argv0);
 }
 
 static void parse_args(int argc, char **argv)
 {
     const char *home = getenv("HOME");
     const char *xdg = getenv("XDG_CONFIG_HOME");
-    snprintf(cfg_cava_conf, sizeof cfg_cava_conf, "%s/%s",
-             xdg ? xdg : "", "wallpaper-bars-gpu/cava.conf");
-    if (!xdg)
-        snprintf(cfg_cava_conf, sizeof cfg_cava_conf, "%s/.config/wallpaper-bars-gpu/cava.conf", home);
+    const char *cache = getenv("XDG_CACHE_HOME");
+
+    if (xdg && *xdg)
+        snprintf(cfg_config, sizeof cfg_config, "%s/wallpaper-bars-gpu/config.toml", xdg);
+    else
+        snprintf(cfg_config, sizeof cfg_config, "%s/.config/wallpaper-bars-gpu/config.toml", home);
+
+    /* cava.conf is GENERATED from [audio]; keep it out of the dotfiles tree */
+    if (cache && *cache)
+        snprintf(cfg_cava_conf, sizeof cfg_cava_conf, "%s/wallpaper-bars-gpu/cava.conf", cache);
+    else
+        snprintf(cfg_cava_conf, sizeof cfg_cava_conf, "%s/.cache/wallpaper-bars-gpu/cava.conf", home);
+
     snprintf(cfg_wallpaper, sizeof cfg_wallpaper, "%s/.config/backgrounds/current-wallpaper", home);
     {
         const char *st = getenv("XDG_STATE_HOME");
@@ -744,21 +880,32 @@ static void parse_args(int argc, char **argv)
         if (!strcmp(a, "--help") || !strcmp(a, "-h")) {
             usage(argv[0]);
             exit(0);
-        } else if (!strcmp(a, "--bands") && v) { cfg_bands = atoi(v); i++; }
-        else if (!strcmp(a, "--gap") && v) { cfg_gap = atof(v); i++; }
-        else if (!strcmp(a, "--radius") && v) { cfg_radius = atof(v); i++; }
-        else if (!strcmp(a, "--opacity") && v) { cfg_opacity = atof(v); i++; }
-        else if (!strcmp(a, "--blur") && v) { cfg_blur = atof(v); i++; }
-        else if (!strcmp(a, "--smooth") && v) { cfg_smooth_ms = atof(v); i++; }
-        else if (!strcmp(a, "--idle") && v) { cfg_idle_ms = atof(v); i++; }
+        } else if (!strcmp(a, "--config") && v) {
+            snprintf(cfg_config, sizeof cfg_config, "%s", v); i++;
+        } else if (!strcmp(a, "--init-config")) {
+            cfg_init_only = 1;
+        } else if (!strcmp(a, "--bands") && v) { ov_bands = atof(v); ov_mask |= OV_BANDS; i++; }
+        else if (!strcmp(a, "--feed") && v) { ov_feed = atof(v); ov_mask |= OV_FEED; i++; }
+        else if (!strcmp(a, "--gap") && v) { ov_gap = atof(v); ov_mask |= OV_GAP; i++; }
+        else if (!strcmp(a, "--radius") && v) { ov_radius = atof(v); ov_mask |= OV_RADIUS; i++; }
+        else if (!strcmp(a, "--opacity") && v) { ov_opac = atof(v); ov_mask |= OV_OPAC; i++; }
+        else if (!strcmp(a, "--blur") && v) { ov_blur = atof(v); ov_mask |= OV_BLUR; i++; }
+        else if (!strcmp(a, "--smooth") && v) { ov_smooth = atof(v); ov_mask |= OV_SMOOTH; i++; }
+        else if (!strcmp(a, "--idle") && v) { ov_idle = atof(v); ov_mask |= OV_IDLE; i++; }
+        else if (!strcmp(a, "--saturation") && v) { ov_sat = atof(v); ov_mask |= OV_SAT; i++; }
+        else if (!strcmp(a, "--lift") && v) { ov_lift = atof(v); ov_mask |= OV_LIFT; i++; }
+        else if (!strcmp(a, "--min-light") && v) { ov_minl = atof(v); ov_mask |= OV_MINL; i++; }
+        else if (!strcmp(a, "--fps") && v) { ov_fps = atof(v); ov_mask |= OV_FPS; i++; }
+        else if (!strcmp(a, "--color-mode") && v) { ov_mode = mode_from_str(v); ov_mask |= OV_MODE; i++; }
         else if (!strcmp(a, "--cava-conf") && v) {
-            snprintf(cfg_cava_conf, sizeof cfg_cava_conf, "%s", v); i++;
+            snprintf(cfg_cava_conf, sizeof cfg_cava_conf, "%s", v);
+            cfg_cava_explicit = 1;
+            i++;
         } else if (!strcmp(a, "--wallpaper") && v) {
-            snprintf(cfg_wallpaper, sizeof cfg_wallpaper, "%s", v); i++;
-        } else if (!strcmp(a, "--saturation") && v) { cfg_sat = atof(v); i++; }
-        else if (!strcmp(a, "--lift") && v) { cfg_lift = atof(v); i++; }
-        else if (!strcmp(a, "--min-light") && v) { cfg_minlight = atof(v); i++; }
-        else if (!strcmp(a, "--demo")) {
+            snprintf(cfg_wallpaper, sizeof cfg_wallpaper, "%s", v);
+            cfg_wall_explicit = 1;
+            i++;
+        } else if (!strcmp(a, "--demo")) {
             cfg_demo = 1;
         } else if (!strcmp(a, "--output") && v) {
             snprintf(cfg_only_output, sizeof cfg_only_output, "%s", v); i++;
@@ -768,13 +915,33 @@ static void parse_args(int argc, char **argv)
             exit(1);
         }
     }
-    if (cfg_bands < 8) cfg_bands = 8;
-    if (cfg_bands > 1024) cfg_bands = 1024;
 }
 
-static char map_out[8][64];
-static int  map_bands[8];
-static int  map_n;
+static int  config_parse(const char *path);
+static int  config_write(const char *path);
+static void load_widget_settings(void);
+static void write_cava_conf(void);
+
+/* config.toml is the source of truth. If it is missing, carry the legacy
+ * Noctalia widget values over once and write it. */
+static void config_boot(void)
+{
+    if (access(cfg_config, R_OK) == 0) {
+        if (config_parse(cfg_config) != 0)
+            logmsg("warning: could not parse %s; using defaults", cfg_config);
+        return;
+    }
+    load_widget_settings();
+    if (config_write(cfg_config) == 0)
+        logmsg("seeded %s from the legacy Noctalia settings", cfg_config);
+    else
+        logmsg("warning: could not write %s: %s", cfg_config, strerror(errno));
+}
+
+/* The Noctalia widget took its look from settings.toml: plugin-level bar_opacity,
+ * saturation and smoothing, plus a per-instance band count (this box runs 64 bands
+ * on the TV and 128 on the laptop panel). Read the same values so the GPU renderer
+ * draws what the widget drew instead of guessing. */
 
 static int bands_for_output(const char *name)
 {
@@ -849,7 +1016,7 @@ static void load_widget_settings(void)
             else if (!strcmp(key, "type") && strstr(val, "wallpaper-bars:bars"))
                 w_isbars = 1;
         } else if (is_widget && is_settings) {
-            if (!strcmp(key, "bands") && w_isbars && w_out[0] && map_n < 8) {
+            if (!strcmp(key, "bands") && w_isbars && w_out[0] && map_n < 16) {
                 snprintf(map_out[map_n], sizeof map_out[map_n], "%s", w_out);
                 map_bands[map_n] = atoi(val);
                 map_n++;
@@ -864,6 +1031,14 @@ static void load_widget_settings(void)
             else if (!strcmp(key, "brightness")) cfg_lift = atof(val);
             else if (!strcmp(key, "min_light")) cfg_minlight = atof(val);
             else if (!strcmp(key, "idle_seconds")) cfg_idle_ms = atof(val) * 1000.0;
+            else if (!strcmp(key, "color_mode")) cfg_color_mode = mode_from_str(val);
+            else if (!strcmp(key, "audio_source") && *val)
+                snprintf(cfg_audio_source, sizeof cfg_audio_source, "%s", val);
+            else if (!strcmp(key, "fps")) {
+                int f = atoi(val);
+                if (f >= 5 && f <= 240)
+                    cfg_fps = f;
+            }
         }
     }
     fclose(f);
@@ -871,6 +1046,409 @@ static void load_widget_settings(void)
         logmsg("bands[%s] = %d", map_out[i], map_bands[i]);
     logmsg("look: opacity=%.2f sat=%.2f blur=%.2f lift=%.2f minlight=%.2f smooth=%.0fms",
            cfg_opacity, cfg_sat, cfg_blur, cfg_lift, cfg_minlight, cfg_smooth_ms);
+}
+
+
+/* ------------------------------------------------------- config.toml (truth)
+ *
+ * ONE file owns the look: $XDG_CONFIG_HOME/wallpaper-bars-gpu/config.toml.
+ * It is written by `wallpaper-bars-config` (the visual editor) but stays a
+ * plain, commented, hand-editable TOML file. The running surface stats it
+ * twice a second and applies edits live -- geometry, colours, band counts,
+ * audio source, wallpaper path -- so the editor preview and the bars on the
+ * desktop can never disagree.
+ *
+ * The legacy Noctalia settings.toml is only read ONCE, to seed this file on
+ * first run. After that it is not consulted at all.
+ */
+
+static int bands_for_output(const char *name);
+
+static void expand_tilde(const char *in, char *out, size_t n)
+{
+    if (in && in[0] == '~' && (in[1] == '/' || in[1] == '\0')) {
+        const char *home = getenv("HOME");
+        snprintf(out, n, "%s%s", home ? home : "", in + 1);
+    } else {
+        snprintf(out, n, "%s", in ? in : "");
+    }
+}
+
+static int mode_from_str(const char *s)
+{
+    if (s && !strcmp(s, "body"))
+        return 1;
+    if (s && !strcmp(s, "floor"))
+        return 2;
+    return 0;
+}
+
+static const char *mode_name(int m)
+{
+    return m == 1 ? "body" : (m == 2 ? "floor" : "tip");
+}
+
+static double clampd(double v, double lo, double hi)
+{
+    return v < lo ? lo : (v > hi ? hi : v);
+}
+
+/* strip an inline comment, but keep '#' that sits inside quotes */
+static void strip_comment(char *v)
+{
+    int quote = 0;
+    for (char *c = v; *c; c++) {
+        if (*c == '"' || *c == '\'') {
+            if (!quote)
+                quote = *c;
+            else if (quote == *c)
+                quote = 0;
+        } else if (*c == '#' && !quote) {
+            *c = '\0';
+            return;
+        }
+    }
+}
+
+static void unquote(char *v)
+{
+    size_t n = strlen(v);
+    if (n >= 2 && ((v[0] == '"' && v[n - 1] == '"') ||
+                   (v[0] == '\'' && v[n - 1] == '\''))) {
+        memmove(v, v + 1, n - 2);
+        v[n - 2] = '\0';
+    }
+}
+
+/* [outputs."HDMI-A-1"] / [output."eDP-1"] / [outputs.eDP-1] -> HDMI-A-1 */
+static int output_section(const char *section, char *name, size_t n)
+{
+    const char *p = NULL;
+    if (!strncmp(section, "outputs.", 8))
+        p = section + 8;
+    else if (!strncmp(section, "output.", 7))
+        p = section + 7;
+    if (!p || !*p) {
+        name[0] = '\0';
+        return 0;
+    }
+    size_t i = 0;
+    char tmp[128];
+    snprintf(tmp, sizeof tmp, "%.120s", p);
+    unquote(tmp);
+    for (char *c = tmp; *c && i + 1 < n; c++, i++)
+        name[i] = *c;
+    name[i] = '\0';
+    return i > 0;
+}
+
+static int config_parse(const char *path)
+{
+    FILE *f = fopen(path, "r");
+    if (!f)
+        return -1;
+
+    char line[1024], section[192] = "";
+
+    while (fgets(line, sizeof line, f)) {
+        char *t = trim(line);
+        if (!*t || *t == '#' || *t == ';')
+            continue;
+        if (*t == '[') {
+            char *e = strchr(t, ']');
+            if (!e)
+                continue;
+            size_t n = (size_t)(e - t - 1);
+            if (n >= sizeof section)
+                n = sizeof section - 1;
+            memcpy(section, t + 1, n);
+            section[n] = '\0';
+            continue;
+        }
+        char *eq = strchr(t, '=');
+        if (!eq)
+            continue;
+        *eq = '\0';
+        char *key = trim(t);
+        char *val = trim(eq + 1);
+        strip_comment(val);
+        val = trim(val);
+        unquote(val);
+        if (!*key)
+            continue;
+
+        int is_num = 1;
+        char *endp = NULL;
+        double num = strtod(val, &endp);
+        if (!endp || endp == val)
+            is_num = 0;
+
+        char oname[64];
+        int  is_out = output_section(section, oname, sizeof oname);
+
+        if (!strcmp(section, "bar")) {
+            if (!strcmp(key, "bands")) { if (is_num) cfg_bands = (int)num; }
+            else if (!strcmp(key, "gap")) { if (is_num) cfg_gap = clampd(num, 0, 64); }
+            else if (!strcmp(key, "radius")) { if (is_num) cfg_radius = clampd(num, 0, 64); }
+            else if (!strcmp(key, "opacity")) { if (is_num) cfg_opacity = clampd(num, 0, 1); }
+            else if (!strcmp(key, "blur")) { if (is_num) cfg_blur = clampd(num, 0, 1); }
+            else if (!strcmp(key, "smoothing")) { if (is_num) cfg_smooth_ms = clampd(num, 0, 1000); }
+            else if (!strcmp(key, "idle_seconds")) { if (is_num) cfg_idle_ms = clampd(num, 0, 600) * 1000.0; }
+            else if (!strcmp(key, "saturation")) { if (is_num) cfg_sat = clampd(num, 0, 4); }
+            else if (!strcmp(key, "brightness")) { if (is_num) cfg_lift = clampd(num, 0, 1); }
+            else if (!strcmp(key, "min_light")) { if (is_num) cfg_minlight = clampd(num, 0, 1); }
+            else if (!strcmp(key, "color_mode")) cfg_color_mode = mode_from_str(val);
+        } else if (!strcmp(section, "audio")) {
+            if (!strcmp(key, "bands")) { if (is_num) cfg_feed = (int)num; }
+            else if (!strcmp(key, "fps")) { if (is_num) cfg_fps = (int)num; }
+            else if (!strcmp(key, "source")) snprintf(cfg_audio_source, sizeof cfg_audio_source, "%s", val);
+        } else if (!strcmp(section, "wallpaper")) {
+            if (!strcmp(key, "path")) expand_tilde(val, cfg_wallpaper, sizeof cfg_wallpaper);
+        } else if (is_out && !strcmp(key, "bands") && is_num && map_n < CFG_MAX_OUT) {
+            snprintf(map_out[map_n], sizeof map_out[map_n], "%s", oname);
+            map_bands[map_n] = (int)clampd(num, 2, 512);
+            map_n++;
+        }
+    }
+    fclose(f);
+
+    if (cfg_bands < 8) cfg_bands = 8;
+    if (cfg_bands > 512) cfg_bands = 512;
+    if (cfg_feed < 8) cfg_feed = 8;
+    if (cfg_feed > 1024) cfg_feed = 1024;
+    if (cfg_fps < 5) cfg_fps = 5;
+    if (cfg_fps > 240) cfg_fps = 240;
+    return 0;
+}
+
+static int mkdir_p(const char *path)
+{
+    char tmp[PATH_MAX];
+    snprintf(tmp, sizeof tmp, "%s", path);
+    for (char *c = tmp + 1; *c; c++) {
+        if (*c != '/')
+            continue;
+        *c = '\0';
+        if (mkdir(tmp, 0755) != 0 && errno != EEXIST)
+            return -1;
+        *c = '/';
+    }
+    if (mkdir(tmp, 0755) != 0 && errno != EEXIST)
+        return -1;
+    return 0;
+}
+
+/* write cfg_* back out, comments and all; atomic so a live watcher never
+ * reads a half-written file */
+static int config_write(const char *path)
+{
+    char dir[PATH_MAX], tmp[PATH_MAX + 8];
+    snprintf(dir, sizeof dir, "%s", path);
+    char *slash = strrchr(dir, '/');
+    if (slash) {
+        *slash = '\0';
+        if (mkdir_p(dir) != 0)
+            return -1;
+    }
+    snprintf(tmp, sizeof tmp, "%s.tmp", path);
+
+    FILE *f = fopen(tmp, "w");
+    if (!f)
+        return -1;
+    fprintf(f,
+        "# wallpaper-bars-gpu -- the ONE source of truth for the bars.\n"
+        "#\n"
+        "# Edit it visually with `wallpaper-bars-config` (Mod+Alt+B) or by hand.\n"
+        "# The running surface reloads this file within half a second; changing\n"
+        "# `bands` in [audio] restarts cava, changing `path` reloads the\n"
+        "# wallpaper texture. Nothing here needs a restart of the bars.\n"
+        "schema = 1\n"
+        "\n"
+        "[bar]\n"
+        "bands       = %d      # default bars per output (see [outputs.<name>])\n"
+        "gap         = %.2f    # px between bars\n"
+        "radius      = %.2f    # px corner radius\n"
+        "opacity     = %.3f   # peak bar opacity\n"
+        "blur        = %.2f    # halo strength 0..1\n"
+        "smoothing   = %.1f  # level smoothing time constant, ms\n"
+        "idle_seconds = %.1f  # fade out after this much silence\n"
+        "saturation  = %.2f    # saturation boost on the sampled wallpaper px\n"
+        "brightness  = %.3f   # lift the sampled colour toward white\n"
+        "min_light   = %.2f    # floor on the sampled colour value\n"
+        "color_mode  = \"%s\"   # tip | body | floor\n"
+        "\n"
+        "[audio]\n"
+        "source = \"%s\"       # pipewire sink name, or \"auto\"\n"
+        "fps    = %d          # cava frame rate\n"
+        "bands  = %d          # cava spectrum width (the levels texture)\n"
+        "\n"
+        "[wallpaper]\n"
+        "path = \"%s\"\n",
+        cfg_bands, cfg_gap, cfg_radius, cfg_opacity, cfg_blur, cfg_smooth_ms,
+        cfg_idle_ms / 1000.0, cfg_sat, cfg_lift, cfg_minlight, mode_name(cfg_color_mode),
+        cfg_audio_source, cfg_fps, cfg_feed, cfg_wallpaper);
+
+    for (int i = 0; i < map_n; i++) {
+        char name[96];
+        snprintf(name, sizeof name, "%.48s", map_out[i]);
+        for (char *c = name; *c; c++)
+            if (*c == '"' || *c == '\'')
+                *c = '_';
+        fprintf(f, "\n[outputs.\"%s\"]\nbands = %d\n", name, map_bands[i]);
+    }
+    if (map_n > 0)
+        fprintf(f, "\n# drop an [outputs.\"NAME\"] table to run that output at its own\n"
+                   "# band count; outputs without one use [bar].bands.\n");
+    fclose(f);
+
+    if (rename(tmp, path) != 0) {
+        unlink(tmp);
+        return -1;
+    }
+    return 0;
+}
+
+/* cava.conf is DERIVED: regenerated from [audio] every time it changes, into
+ * the cache dir so nothing generated ever lands in the dotfiles repo. */
+static void write_cava_conf(void)
+{
+    if (cfg_cava_explicit)
+        return;
+    char dir[PATH_MAX];
+    snprintf(dir, sizeof dir, "%s", cfg_cava_conf);
+    char *slash = strrchr(dir, '/');
+    if (slash) {
+        *slash = '\0';
+        mkdir_p(dir);
+    }
+    FILE *f = fopen(cfg_cava_conf, "w");
+    if (!f) {
+        logmsg("cannot write cava config %s: %s", cfg_cava_conf, strerror(errno));
+        return;
+    }
+    fprintf(f,
+        "# generated by wallpaper-bars-gpu from %s\n"
+        "# edit that file, not this one\n"
+        "[general]\n"
+        "bars = %d\n"
+        "framerate = %d\n"
+        "\n"
+        "[output]\n"
+        "method = raw\n"
+        "raw_target = /dev/stdout\n"
+        "data_format = ascii\n"
+        "channels = mono\n"
+        "\n"
+        "[input]\n"
+        "method = pipewire\n"
+        "source = %s\n",
+        cfg_config, cfg_feed, cfg_fps,
+        cfg_audio_source[0] ? cfg_audio_source : "auto");
+    fclose(f);
+}
+
+static void cava_restart(void)
+{
+    if (cfg_demo)
+        return;
+    if (cava_pid > 0) {
+        kill(cava_pid, SIGTERM);
+        int st = 0;
+        waitpid(cava_pid, &st, 0);
+        cava_pid = -1;
+    }
+    if (cava_fd >= 0) {
+        close(cava_fd);
+        cava_fd = -1;
+    }
+    cava_spawn();
+}
+
+static void apply_overrides(void)
+{
+    if (ov_mask & OV_BANDS)  cfg_bands = (int)ov_bands;
+    if (ov_mask & OV_FEED)   cfg_feed = (int)ov_feed;
+    if (ov_mask & OV_GAP)    cfg_gap = ov_gap;
+    if (ov_mask & OV_RADIUS) cfg_radius = ov_radius;
+    if (ov_mask & OV_OPAC)   cfg_opacity = ov_opac;
+    if (ov_mask & OV_BLUR)   cfg_blur = ov_blur;
+    if (ov_mask & OV_SMOOTH) cfg_smooth_ms = ov_smooth;
+    if (ov_mask & OV_IDLE)   cfg_idle_ms = ov_idle;
+    if (ov_mask & OV_SAT)    cfg_sat = ov_sat;
+    if (ov_mask & OV_LIFT)   cfg_lift = ov_lift;
+    if (ov_mask & OV_MINL)   cfg_minlight = ov_minl;
+    if (ov_mask & OV_FPS)    cfg_fps = (int)ov_fps;
+    if (ov_mask & OV_MODE)   cfg_color_mode = (int)ov_mode;
+    if (cfg_bands < 8) cfg_bands = 8;
+    if (cfg_bands > 512) cfg_bands = 512;
+    if (cfg_feed < 8) cfg_feed = 8;
+    if (cfg_feed > 1024) cfg_feed = 1024;
+}
+
+static time_t file_stamp(const char *path)
+{
+    struct stat st;
+    if (!path || !*path || stat(path, &st) != 0)
+        return 0;
+    return st.st_mtime;
+}
+
+/* re-read config.toml; returns 1 when anything worth a repaint changed */
+static int config_apply(void)
+{
+    /* snapshot the live state FIRST, then re-parse over it */
+    int    old_feed = cfg_feed, old_fps = cfg_fps, old_bands = cfg_bands;
+    int    old_mode = cfg_color_mode;
+    double old_gap = cfg_gap, old_radius = cfg_radius, old_opac = cfg_opacity;
+    double old_blur = cfg_blur, old_smooth = cfg_smooth_ms, old_idle = cfg_idle_ms;
+    double old_sat = cfg_sat, old_lift = cfg_lift, old_minl = cfg_minlight;
+    char   old_src[160], old_wall[PATH_MAX];
+    char   old_map_out[CFG_MAX_OUT][64];
+    int    old_map_bands[CFG_MAX_OUT], old_map_n = map_n;
+    snprintf(old_src, sizeof old_src, "%s", cfg_audio_source);
+    snprintf(old_wall, sizeof old_wall, "%s", cfg_wallpaper);
+    memcpy(old_map_out, map_out, sizeof old_map_out);
+    memcpy(old_map_bands, map_bands, sizeof old_map_bands);
+
+    if (config_parse(cfg_config) != 0)
+        return 0;
+
+    int changed = 0;
+    if (cfg_feed != old_feed) {
+        feed_dirty = 1;
+        changed = 1;
+        for (int i = 0; i < 1024; i++) {
+            levels[i] = 0.f;
+            targets[i] = 0.f;
+        }
+    }
+    if (strcmp(cfg_wallpaper, old_wall) != 0) {
+        wall_mtime = -1;
+        changed = 1;
+    }
+    if (cfg_feed != old_feed || cfg_fps != old_fps || strcmp(cfg_audio_source, old_src) != 0) {
+        write_cava_conf();
+        cava_restart();
+        changed = 1;
+    }
+    int map_changed = map_n != old_map_n;
+    for (int i = 0; !map_changed && i < map_n; i++) {
+        if (map_bands[i] != old_map_bands[i] || strcmp(map_out[i], old_map_out[i]) != 0)
+            map_changed = 1;
+    }
+    if (cfg_bands != old_bands || map_changed) {
+        for (struct output *o = outputs; o; o = o->next)
+            o->bands = 0;
+        changed = 1;
+    }
+    if (cfg_gap != old_gap || cfg_radius != old_radius || cfg_opacity != old_opac ||
+        cfg_blur != old_blur || cfg_smooth_ms != old_smooth || cfg_idle_ms != old_idle ||
+        cfg_sat != old_sat || cfg_lift != old_lift || cfg_minlight != old_minl ||
+        cfg_color_mode != old_mode)
+        changed = 1;
+
+    logmsg("config reloaded from %s%s", cfg_config, changed ? "" : " (no visible change)");
+    return changed;
 }
 
 static void egl_boot(void)
@@ -917,9 +1495,19 @@ int main(int argc, char **argv)
     signal(SIGPIPE, SIG_IGN);
     signal(SIGTERM, on_signal);
     signal(SIGINT, on_signal);
+    signal(SIGHUP, on_signal);      /* SIGHUP = quit too; the bars reload config live */
     parse_args(argc, argv);
-    load_widget_settings();
-    for (int i = 0; i < cfg_bands; i++) {
+    config_boot();
+    if (cfg_init_only) {
+        int rc = config_write(cfg_config);
+        logmsg(rc == 0 ? "wrote %s" : "could not write %s: %s",
+               cfg_config, rc == 0 ? cfg_config : strerror(errno));
+        return rc == 0 ? 0 : 1;
+    }
+    apply_overrides();
+    write_cava_conf();
+    cfg_stamp = file_stamp(cfg_config);
+    for (int i = 0; i < 1024; i++) {
         levels[i] = 0.f;
         targets[i] = 0.f;
     }
@@ -939,9 +1527,10 @@ int main(int argc, char **argv)
     }
 
     egl_boot();
-
+    /* one context is enough: each surface is made current for its own draw */
     if (!eglMakeCurrent(egl_dpy, EGL_NO_SURFACE, EGL_NO_SURFACE, egl_ctx)) {
-
+        /* no surfaceless support: park the context on a 1x1 pbuffer so
+         * textures can be created and uploaded before any surface exists */
         const EGLint pb[] = { EGL_WIDTH, 1, EGL_HEIGHT, 1, EGL_NONE };
         EGLSurface tmp = eglCreatePbufferSurface(egl_dpy, egl_cfg, pb);
         if (tmp == EGL_NO_SURFACE || !eglMakeCurrent(egl_dpy, tmp, tmp, egl_ctx)) {
@@ -957,6 +1546,7 @@ int main(int argc, char **argv)
         create_surface(o);
     wl_display_roundtrip(wl_dpy);
 
+    /* Fallback: outputs may have been announced after our first roundtrip. */
     if (!outputs) {
         logmsg("no wl_output yet, retrying");
         wl_display_roundtrip(wl_dpy);
@@ -967,13 +1557,27 @@ int main(int argc, char **argv)
 
     double last = now_ms();
     double last_wall_check = 0;
+    double last_cfg_check = 0;
     int fading = 0;
-    if (access(cfg_cava_conf, R_OK) != 0)
+    if (!cfg_demo && access(cfg_cava_conf, R_OK) != 0)
         logmsg("warning: cava config %s unreadable", cfg_cava_conf);
+    logmsg("config: %s", cfg_config);
 
     while (!quit) {
         double t0 = now_ms();
-        double timeout = 1000;
+        double timeout = 1000; /* idle wake for the wallpaper check */
+        int cfg_changed = 0;
+
+        /* config.toml is watched, not signalled: any editor (or `$EDITOR`)
+         * that writes it gets applied on the next tick. */
+        if (t0 - last_cfg_check > 400) {
+            last_cfg_check = t0;
+            time_t stamp = file_stamp(cfg_config);
+            if (stamp != 0 && stamp != cfg_stamp) {
+                cfg_stamp = stamp;
+                cfg_changed = config_apply();
+            }
+        }
         if (fading)
             timeout = 16;
         if (cfg_demo) {
@@ -999,7 +1603,7 @@ int main(int argc, char **argv)
             logmsg("poll: %s", strerror(errno));
             break;
         }
-        int dirty = cfg_demo;
+        int dirty = cfg_demo || cfg_changed;
         if (pr > 0 && (pf[0].revents & POLLIN)) {
             if (wl_display_read_events(wl_dpy) != 0) {
                 logmsg("wayland connection lost");
@@ -1008,6 +1612,10 @@ int main(int argc, char **argv)
             wl_display_dispatch_pending(wl_dpy);
         } else {
             wl_display_cancel_read(wl_dpy);
+        }
+        if (redraw_req) {   /* an output's frame callback came back */
+            redraw_req = 0;
+            dirty = 1;
         }
         if (!cfg_demo && pr > 0 && (pf[1].revents & POLLIN)) {
             if (cava_pump() > 0)
@@ -1026,6 +1634,7 @@ int main(int argc, char **argv)
         if (dt > 250) dt = 250;
         last = t1;
 
+        /* smoothing + fade run on every frame we draw */
         if (dirty || fading) {
             float k = cfg_smooth_ms > 0 ? (float)(1.0 - exp(-dt / cfg_smooth_ms)) : 1.f;
             float peak = 0.f;
@@ -1048,6 +1657,9 @@ int main(int argc, char **argv)
             else if (fade > 0.996f)
                 fade = 1.f;
 
+            /* keep ticking only while there is something to see: once fully
+             * faded and silent, skip the draw entirely (cava keeps streaming
+             * zero lines, which would otherwise force a frame every tick). */
             if (fade > 0.0f)
                 render_all();
             fading = (fade_target == 0.0 && fade > 0.0);

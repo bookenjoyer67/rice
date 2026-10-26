@@ -1,0 +1,880 @@
+#!/usr/bin/python3
+"""wallpaper-bars-config -- visual settings for wallpaper-bars-gpu.
+
+ONE file is the source of truth:
+
+    $XDG_CONFIG_HOME/wallpaper-bars-gpu/config.toml
+
+This window edits that file and nothing else. The running wallpaper-bars-gpu
+watches its mtime and applies edits within half a second, so what the preview
+here shows is what lands on the desktop -- no restart, no second copy of the
+settings, no CLI flags to remember.
+
+The preview is not a mock: it samples the current wallpaper with the same
+magick pipeline the shader's texture comes from, tints it with the same HSV
+math, and lays the bars out with the same geometry/alpha code the GLSL uses.
+"""
+
+import math
+import os
+import shutil
+import subprocess
+import sys
+import threading
+import time
+import warnings
+
+import gi
+
+gi.require_version("Gtk", "4.0")
+gi.require_version("Gdk", "4.0")
+from gi.repository import Gdk, GdkPixbuf, GLib, Gio, Gtk, Pango  # noqa: E402
+
+try:
+    import cairo
+except ImportError:  # pragma: no cover
+    sys.stderr.write("wallpaper-bars-config: pycairo is required (python-cairo)\n")
+    raise SystemExit(1)
+
+APP_ID = "online.catperson.wallpaper-bars"
+BIN = os.path.expanduser("~/.local/bin/wallpaper-bars-gpu")
+CACHE = os.environ.get("XDG_CACHE_HOME") or os.path.expanduser("~/.cache")
+LOG = os.path.join(CACHE, "wallpaper-bars-gpu.log")
+
+CONFIG_DIR = os.path.join(
+    os.environ.get("XDG_CONFIG_HOME") or os.path.expanduser("~/.config"),
+    "wallpaper-bars-gpu",
+)
+CONFIG = os.path.join(CONFIG_DIR, "config.toml")
+
+# (key, label, min, max, step, digits, help)
+SLIDERS = [
+    ("bands", "Bands", 8, 512, 1, 0,
+     "Default number of bars across an output. Per-output overrides live further down."),
+    ("gap", "Gap", 0.0, 24.0, 0.5, 1,
+     "Space between bars, in pixels."),
+    ("radius", "Corner radius", 0.0, 24.0, 0.5, 1,
+     "Rounded corner radius of each bar."),
+    ("opacity", "Opacity", 0.02, 1.0, 0.02, 2,
+     "Peak alpha of a full-height bar."),
+    ("blur", "Glow", 0.0, 1.0, 0.05, 2,
+     "Halo strength: 0 is a crisp bar, 1 is the wide translucent falloff."),
+    ("smoothing", "Smoothing", 0.0, 600.0, 5.0, 0,
+     "Level smoothing time constant in milliseconds. Preview honours it."),
+    ("saturation", "Saturation", 0.0, 4.0, 0.05, 2,
+     "Saturation multiplier on the wallpaper colour behind each bar."),
+    ("brightness", "Brightness", 0.0, 1.0, 0.02, 2,
+     "Lifts the sampled colour toward white."),
+    ("min_light", "Min light", 0.0, 1.0, 0.02, 2,
+     "Floor on the sampled colour's value, so dark wallpapers still glow."),
+    ("idle_seconds", "Fade after", 0.0, 60.0, 0.5, 1,
+     "Seconds of silence before the bars fade out. 0 keeps them up."),
+]
+
+DEFAULTS = {
+    "bands": 128,
+    "gap": 1.5,
+    "radius": 4.0,
+    "opacity": 0.22,
+    "blur": 1.0,
+    "smoothing": 165.0,
+    "saturation": 2.8,
+    "brightness": 0.18,
+    "min_light": 0.40,
+    "idle_seconds": 6.0,
+    "color_mode": "tip",
+    "source": "auto",
+    "fps": 144,
+    "feed": 128,
+    "wallpaper": "~/.config/backgrounds/current-wallpaper",
+    "outputs": {},
+}
+
+MODES = ["tip", "body", "floor"]
+FPS_CHOICES = ["30", "60", "72", "120", "144", "165", "240"]
+ROWS = 24  # sampled wallpaper rows, same as the shader's vertical resolution
+
+
+def expand(path):
+    return os.path.expanduser(path or "")
+
+
+# --------------------------------------------------------------- config i/o
+
+
+def read_config(path=CONFIG):
+    """Parse the subset of TOML the C side writes. Tolerant by design."""
+    cfg = {k: v for k, v in DEFAULTS.items()}
+    cfg["outputs"] = {}
+    section = ""
+    try:
+        with open(path, "r") as fh:
+            lines = fh.readlines()
+    except FileNotFoundError:
+        return None
+    for raw in lines:
+        line = raw.split("#", 1)[0].strip()
+        if not line:
+            continue
+        if line.startswith("[") and line.endswith("]"):
+            section = line[1:-1].strip()
+            if section.startswith("outputs."):
+                name = section[len("outputs."):].strip().strip('"').strip("'")
+                cfg["outputs"].setdefault(name, {})
+            continue
+        if "=" not in line:
+            continue
+        key, val = line.split("=", 1)
+        key, val = key.strip(), val.strip().strip("'\"")
+        if section == "bar":
+            if key == "color_mode":
+                cfg[key] = val if val in MODES else "tip"
+            elif key in cfg:
+                try:
+                    cfg[key] = int(float(val)) if key == "bands" else float(val)
+                except ValueError:
+                    pass
+        elif section == "audio":
+            if key in ("fps", "bands"):
+                try:
+                    cfg["fps" if key == "fps" else "feed"] = int(float(val))
+                except ValueError:
+                    pass
+            elif key == "source":
+                cfg["source"] = val or "auto"
+        elif section == "wallpaper" and key == "path":
+            cfg["wallpaper"] = val
+        elif section.startswith("outputs."):
+            name = section[len("outputs."):].strip().strip('"').strip("'")
+            if key == "bands":
+                try:
+                    cfg["outputs"][name] = int(float(val))
+                except ValueError:
+                    pass
+    for k in ("bands", "fps", "feed"):
+        cfg[k] = int(cfg[k])
+    return cfg
+
+
+def write_config(cfg, path=CONFIG):
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    tmp = path + ".tmp"
+    out = [
+        "# wallpaper-bars-gpu -- the ONE source of truth for the bars.",
+        "# Written by wallpaper-bars-config; safe to edit by hand.",
+        "# The running surface reloads this file within half a second.",
+        "schema = 1",
+        "",
+        "[bar]",
+        "bands        = %d      # default bars per output (see [outputs.<name>])" % cfg["bands"],
+        "gap          = %.2f    # px between bars" % cfg["gap"],
+        "radius       = %.2f    # px corner radius" % cfg["radius"],
+        "opacity      = %.3f   # peak bar opacity" % cfg["opacity"],
+        "blur         = %.2f    # glow / halo strength 0..1" % cfg["blur"],
+        "smoothing    = %.1f  # level smoothing, ms" % cfg["smoothing"],
+        "idle_seconds = %.1f  # fade out after this much silence" % cfg["idle_seconds"],
+        "saturation   = %.2f    # saturation boost on the wallpaper sample" % cfg["saturation"],
+        "brightness   = %.3f   # lift the sample toward white" % cfg["brightness"],
+        "min_light    = %.2f    # floor on the sample's value" % cfg["min_light"],
+        'color_mode   = "%s"   # tip | body | floor' % cfg["color_mode"],
+        "",
+        "[audio]",
+        'source = "%s"' % cfg["source"],
+        "fps    = %d          # cava frame rate" % cfg["fps"],
+        "bands  = %d          # cava spectrum width" % cfg["feed"],
+        "",
+        "[wallpaper]",
+        'path = "%s"' % cfg["wallpaper"],
+    ]
+    for name in sorted(cfg["outputs"]):
+        safe = name.replace('"', "_")
+        out += ["", '[outputs."%s"]' % safe, "bands = %d" % int(cfg["outputs"][name])]
+    with open(tmp, "w") as fh:
+        fh.write("\n".join(out) + "\n")
+    os.replace(tmp, path)
+
+
+# ------------------------------------------------------------ wallpaper data
+
+
+def sample_wallpaper(path, cols):
+    """Return ROWS lists of cols 0xRRGGBB ints, top row first (magick, as the
+    shader's texture is built from the same image)."""
+    target = expand(path)
+    if not os.path.exists(target):
+        return None
+    try:
+        res = subprocess.run(
+            ["magick", target, "-auto-orient", "-resize", "%dx%d!" % (cols, ROWS),
+             "-depth", "8", "txt:-"],
+            capture_output=True, text=True, timeout=20,
+        )
+    except Exception:
+        return None
+    if res.returncode != 0:
+        return None
+    px = []
+    for line in res.stdout.splitlines():
+        if "#" not in line:
+            continue
+        hexv = line.split("#", 1)[1][:6]
+        if len(hexv) == 6:
+            try:
+                px.append(int(hexv, 16))
+            except ValueError:
+                pass
+    if len(px) < cols * ROWS:
+        return None
+    return [px[r * cols:(r + 1) * cols] for r in range(ROWS)]
+
+
+def tint(rgb, sat_mult, lift, min_light):
+    r = ((rgb >> 16) & 255) / 255.0
+    g = ((rgb >> 8) & 255) / 255.0
+    b = (rgb & 255) / 255.0
+    mx, mn = max(r, g, b), min(r, g, b)
+    d = mx - mn
+    h = 0.0
+    if d > 1e-6:
+        if mx == r:
+            h = ((g - b) / d) % 6
+        elif mx == g:
+            h = (b - r) / d + 2
+        else:
+            h = (r - g) / d + 4
+        h /= 6
+    s = d / mx if mx > 1e-6 else 0.0
+    v = mx
+    s = min(1.0, max(0.0, s * sat_mult))
+    v = min(1.0, max(0.0, v + (1.0 - v) * lift))
+    v = max(v, min_light)
+    i = int(h * 6)
+    f = h * 6 - i
+    p = v * (1 - s)
+    q = v * (1 - f * s)
+    t = v * (1 - (1 - f) * s)
+    i %= 6
+    if i == 0:
+        r, g, b = v, t, p
+    elif i == 1:
+        r, g, b = q, v, p
+    elif i == 2:
+        r, g, b = p, v, t
+    elif i == 3:
+        r, g, b = p, q, v
+    elif i == 4:
+        r, g, b = t, p, v
+    else:
+        r, g, b = v, p, q
+    return r, g, b
+
+
+# ------------------------------------------------------------------ preview
+
+
+class Preview(Gtk.DrawingArea):
+    """Bars over the real wallpaper, with the real geometry and tint."""
+
+    def __init__(self, win):
+        super().__init__()
+        self.win = win
+        self.set_content_width(760)
+        self.set_content_height(330)
+        self.set_draw_func(self._draw)
+        self.cfg = win.cfg
+        self.grid = None            # sampled wallpaper rows
+        self.grid_key = None
+        self.levels = None
+        self.targets = None
+        self.pixbuf = None
+        self.pix_key = None
+        self.pix_surface = None
+        self.pix_surface_key = None
+        self.last_us = GLib.get_monotonic_time()
+        self.phase = 0.0
+        GLib.timeout_add(33, self._tick)
+
+    # -- data ------------------------------------------------------------
+    def wallpaper_changed(self):
+        self.pix_key = None
+        self.grid_key = None
+
+    def _ensure_data(self):
+        path = expand(self.cfg["wallpaper"])
+        cols = max(8, min(512, int(self.cfg["bands"])))
+        key = (path, cols)
+        if self.grid_key != key:
+            self.grid_key = key
+            self._resample(path, cols)
+        w = max(2, self.get_width())
+        h = max(2, self.get_height())
+        pkey = (path, w, h)
+        if self.pix_key != pkey:
+            self.pix_key = pkey
+            self.pixbuf = self._load_pixbuf(path, w, h)
+            self.pix_surface = None
+
+    @staticmethod
+    def _load_pixbuf(path, w, h):
+        """Wallpaper cropped to fill the preview box, like niri's fill mode."""
+        try:
+            info = GdkPixbuf.Pixbuf.get_file_info(path)
+            iw, ih = info[1], info[2]
+            if iw <= 0 or ih <= 0:
+                return None
+            scale = max(w / iw, h / ih)
+            dw = max(w, int(iw * scale + 0.5))
+            dh = max(h, int(ih * scale + 0.5))
+            pix = GdkPixbuf.Pixbuf.new_from_file_at_scale(path, dw, dh, False)
+            return pix.new_subpixbuf((dw - w) // 2, (dh - h) // 2, w, h).add_alpha(False, 0, 0, 0)
+        except Exception:
+            return None
+
+    def _resample(self, path, cols):
+        def work():
+            grid = sample_wallpaper(path, cols)
+            GLib.idle_add(self._got_grid, (path, cols), grid)
+        threading.Thread(target=work, daemon=True).start()
+
+    def _got_grid(self, key, grid):
+        if key == self.grid_key:
+            self.grid = grid
+            self.queue_draw()
+        return False
+
+    # -- animation -------------------------------------------------------
+    def _tick(self):
+        now = GLib.get_monotonic_time()
+        dt = max(0.0, (now - self.last_us) / 1000.0)
+        self.last_us = now
+        if not self.get_mapped():
+            return True
+        self.phase += dt / 1000.0
+
+        n = max(8, min(512, int(self.cfg["bands"])))
+        if self.levels is None or len(self.levels) != n:
+            self.levels = [0.0] * n
+            self.targets = [0.0] * n
+        t = self.phase
+        for i in range(n):
+            base = 0.5 + 0.34 * math.sin(t * 1.9 + i * 0.21) * math.sin(t * 0.73 + i * 0.055)
+            base += 0.12 * math.sin(t * 3.1 + i * 0.47)
+            self.targets[i] = min(1.0, max(0.0, base))
+        smooth = float(self.cfg["smoothing"])
+        k = 1.0 if smooth <= 0 else 1.0 - math.exp(-dt / smooth)
+        for i in range(n):
+            self.levels[i] += (self.targets[i] - self.levels[i]) * k
+        self.queue_draw()
+        return True
+
+    # -- paint -----------------------------------------------------------
+    def _draw(self, _area, cr, w, h):
+        self._ensure_data()
+        cfg = self.cfg
+
+        # wallpaper backdrop, cropped to fill the preview like niri's fill mode
+        if self.pixbuf is not None:
+            # Gdk's pixbuf->cairo bridge is "deprecated" in GTK 4 in favour of
+            # snapshots, but it is the only correct channel-order bridge for a
+            # plain cairo context; hand-rolling ARGB32 byte shuffles is worse.
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore", DeprecationWarning)
+                Gdk.cairo_set_source_pixbuf(cr, self.pixbuf, 0, 0)
+            cr.paint()
+        else:
+            cr.set_source_rgb(0.06, 0.07, 0.09)
+            cr.paint()
+
+        cr.set_source_rgba(0, 0, 0, 0.18)
+        cr.paint()
+
+        n = max(8, min(512, int(cfg["bands"])))
+        gap = max(0.0, float(cfg["gap"]))
+        radius = max(0.0, float(cfg["radius"]))
+        blur = min(1.0, max(0.0, float(cfg["blur"])))
+        opacity = min(1.0, max(0.0, float(cfg["opacity"])))
+
+        bar_w = w / n
+        half_bar = max(0.5, (bar_w - gap) * 0.5)
+        core_half = max(0.5, half_bar * (0.45 - 0.32 * blur))
+        halo_extra = bar_w * 1.5 * blur
+        vspread = h * 0.09 * blur
+        min_bar = max(2.0, h * 0.004)
+        bar_max = max(min_bar, h - vspread)
+        core_alpha = opacity * (1.0 - 0.45 * blur)
+        layers = int(4 + 6 * blur) if blur > 0.01 else 0
+
+        def alpha_at(j):
+            if layers <= 0:
+                return 0.0
+            t0 = j / layers
+            pj = core_alpha * math.exp(-4.0 * t0 * t0)
+            if j == layers:
+                return max(0.0, min(1.0, pj))
+            t1 = (j + 1) / layers
+            pj1 = core_alpha * math.exp(-4.0 * t1 * t1)
+            return max(0.0, min(1.0, (pj - pj1) / max(1e-4, 1.0 - pj1)))
+
+        def rrect(cx, bottom, half_w, height, r, color, alpha):
+            if alpha <= 0.004 or height <= 0.2:
+                return
+            x0 = cx - half_w
+            y0 = bottom - height
+            r = min(r, half_w, height / 2)
+            cr.new_sub_path()
+            cr.arc(x0 + half_w - r, y0 + r, r, math.pi, 1.5 * math.pi)
+            cr.arc(x0 + half_w - r, y0 + height - r, r, 1.5 * math.pi, 2 * math.pi)
+            cr.arc(x0 + r, y0 + height - r, r, 0, 0.5 * math.pi)
+            cr.arc(x0 + r, y0 + r, r, 0.5 * math.pi, math.pi)
+            cr.close_path()
+            cr.set_source_rgba(color[0], color[1], color[2], alpha)
+            cr.fill()
+
+        grid = self.grid
+        levels = self.levels or [0.0] * n
+        fade = 1.0
+        for i in range(n):
+            lvl = levels[i] if i < len(levels) else 0.0
+            bar_h = min_bar + lvl * max(0.0, bar_max - min_bar)
+            cx = (i + 0.5) * bar_w
+
+            if grid:
+                cols = len(grid[0])
+                col = min(cols, max(1, int((i + 0.5) / n * cols) + 1))
+                mode = cfg["color_mode"]
+                if mode == "floor":
+                    row = ROWS
+                elif mode == "body":
+                    row = 1 + int((1 - lvl * 0.5) * (ROWS - 1) + 0.5)
+                else:
+                    row = 1 + int((1 - lvl) * (ROWS - 1) + 0.5)
+                row = min(ROWS, max(1, row))
+                color = tint(grid[row - 1][col - 1], float(cfg["saturation"]),
+                             float(cfg["brightness"]), float(cfg["min_light"]))
+            else:
+                color = (0.56, 0.84, 1.0)
+
+            if layers <= 0:
+                rrect(cx, h, core_half, bar_h, radius, color, core_alpha * fade)
+                continue
+            for j in range(layers, 0, -1):
+                t0 = j / layers
+                half = core_half + halo_extra * t0
+                height = bar_h + vspread * (t0 ** 1.3 if t0 > 0 else 0)
+                rr = min(radius, half, height / 2)
+                rrect(cx, h, half, height, rr, color, alpha_at(j) * fade)
+            rrect(cx, h, core_half, bar_h, min(radius, core_half), color, core_alpha * fade)
+
+
+# ---------------------------------------------------------------- the window
+
+
+class Row:
+    """One labelled control; keeps the widget + how to read/write it."""
+
+    def __init__(self, widget, get, set_):
+        self.widget = widget
+        self.get = get
+        self.set_ = set_
+
+
+class App(Gtk.Application):
+    def __init__(self):
+        super().__init__(application_id=APP_ID, flags=Gio.ApplicationFlags.FLAGS_NONE)
+        self.cfg = None
+        self.rows = {}
+        self.pending = None
+        self.loading = True
+
+    # -- lifecycle -------------------------------------------------------
+    def do_activate(self):
+        if self.cfg is None:
+            self.cfg = read_config()
+            if self.cfg is None:
+                subprocess.run([BIN, "--init-config"], check=False)
+                self.cfg = read_config() or dict(DEFAULTS)
+        if not self.cfg["wallpaper"]:
+            self.cfg["wallpaper"] = DEFAULTS["wallpaper"]
+
+        win = Gtk.ApplicationWindow(application=self, title="Wallpaper Bars")
+        win.set_default_size(1180, 700)
+        win.set_titlebar(self._header())
+        win.set_child(self._body())
+        win.present()
+        self.loading = False
+        self.watch_config(win)
+        GLib.timeout_add(1500, self._sync_from_disk)
+
+    def _header(self):
+        hb = Gtk.HeaderBar()
+        hb.set_show_title_buttons(True)
+        title = Gtk.Label(label="Wallpaper Bars")
+        title.add_css_class("title")
+        hb.set_title_widget(title)
+
+        btn = Gtk.Button(label="Restart bars")
+        btn.set_tooltip_text("Stop and start wallpaper-bars-gpu (it normally reloads by itself)")
+        btn.connect("clicked", self._restart_bars)
+        hb.pack_end(btn)
+
+        pathbtn = Gtk.Button(label="config.toml")
+        pathbtn.set_tooltip_text(CONFIG + "\nClick to open the file in your editor")
+        pathbtn.connect("clicked", lambda *_: subprocess.Popen(["xdg-open", CONFIG]))
+        hb.pack_end(pathbtn)
+        return hb
+
+    def _body(self):
+        paned = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=0)
+
+        scroll = Gtk.ScrolledWindow()
+        scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+        scroll.set_size_request(390, -1)
+        col = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+        col.set_margin_top(14)
+        col.set_margin_bottom(14)
+        col.set_margin_start(16)
+        col.set_margin_end(16)
+        scroll.set_child(col)
+        paned.append(scroll)
+
+        self._build_controls(col)
+
+        right = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10)
+        right.set_margin_top(14)
+        right.set_margin_bottom(14)
+        right.set_margin_start(14)
+        right.set_margin_end(14)
+        right.set_hexpand(True)
+
+        self.preview = Preview(self)
+        frame = Gtk.Frame()
+        frame.set_child(self.preview)
+        frame.set_hexpand(True)
+        frame.set_vexpand(True)
+        right.append(frame)
+
+        hint = Gtk.Label(
+            label="Preview is generated from the same wallpaper sample, tint maths and "
+                  "bar geometry the shader uses.\nChanges are written to config.toml "
+                  "immediately and the running bars pick them up in ~0.4 s.")
+        hint.set_wrap(True)
+        hint.add_css_class("dim-label")
+        hint.set_xalign(0)
+        right.append(hint)
+
+        paned.append(right)
+        return paned
+
+    # -- controls --------------------------------------------------------
+    def _group(self, col, title, subtitle=None):
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
+        box.set_margin_top(10)
+        if col.get_first_child() is not None:
+            sep = Gtk.Separator()
+            sep.set_margin_top(8)
+            sep.set_margin_bottom(2)
+            col.append(sep)
+        head = Gtk.Label(label=title)
+        head.add_css_class("heading")
+        head.set_xalign(0)
+        box.append(head)
+        if subtitle:
+            sub = Gtk.Label(label=subtitle)
+            sub.add_css_class("dim-label")
+            sub.set_xalign(0)
+            sub.set_wrap(True)
+            box.append(sub)
+        col.append(box)
+        return box
+
+    def _slider(self, box, key, label, lo, hi, step, digits, tooltip=None):
+        row = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
+        top = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        name = Gtk.Label(label=label)
+        name.set_xalign(0)
+        name.set_hexpand(True)
+        val = Gtk.Label()
+        val.add_css_class("dim-label")
+        val.set_xalign(1)
+        top.append(name)
+        top.append(val)
+        row.append(top)
+        scale = Gtk.Scale.new_with_range(Gtk.Orientation.HORIZONTAL, lo, hi, step)
+        scale.set_draw_value(False)
+        scale.set_hexpand(True)
+        if tooltip:
+            scale.set_tooltip_text(tooltip)
+        cur = float(self.cfg[key])
+        scale.set_value(cur)
+
+        def fmt(v):
+            return ("%d" % round(v)) if digits == 0 else ("%.*f" % (digits, v))
+
+        val.set_text(fmt(cur))
+
+        def on_change(sc):
+            v = sc.get_value()
+            val.set_text(fmt(v))
+            self.cfg[key] = int(round(v)) if digits == 0 else round(v, 3)
+            self.touch()
+
+        scale.connect("value-changed", on_change)
+        row.append(scale)
+        box.append(row)
+        self.rows[key] = Row(scale, lambda: self.cfg[key],
+                             lambda v: scale.set_value(float(v)))
+
+    def _combo(self, box, key, label, choices, tooltip=None, cast=str):
+        row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        name = Gtk.Label(label=label)
+        name.set_xalign(0)
+        name.set_hexpand(True)
+        row.append(name)
+        dd = Gtk.DropDown.new_from_strings(choices)
+        cur = str(self.cfg[key])
+        if cur in choices:
+            dd.set_selected(choices.index(cur))
+        if tooltip:
+            dd.set_tooltip_text(tooltip)
+        dd.connect("notify::selected", lambda d, _p: (
+            self.cfg.__setitem__(key, cast(choices[d.get_selected()])), self.touch()))
+        row.append(dd)
+        box.append(row)
+        self.rows[key] = Row(dd, lambda: self.cfg[key],
+                             lambda v: dd.set_selected(choices.index(str(v)) if str(v) in choices else 0))
+
+    def _entry(self, box, key, label, tooltip=None):
+        row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        name = Gtk.Label(label=label)
+        name.set_xalign(0)
+        name.set_hexpand(True)
+        row.append(name)
+        entry = Gtk.Entry()
+        entry.set_text(str(self.cfg[key]))
+        entry.set_width_chars(22)
+        if tooltip:
+            entry.set_tooltip_text(tooltip)
+        entry.connect("changed", lambda e: (self.cfg.__setitem__(key, e.get_text().strip()),
+                                            self.touch()))
+        row.append(entry)
+        box.append(row)
+        return entry
+
+    def _build_controls(self, col):
+        shape = self._group(col, "Shape", "Geometry of the bars themselves.")
+        for key, label, lo, hi, step, digits, tip in SLIDERS[:3]:
+            self._slider(shape, key, label, lo, hi, step, digits, tip)
+
+        look = self._group(col, "Look", "Colour is sampled from the wallpaper behind each bar.")
+        for key, label, lo, hi, step, digits, tip in SLIDERS[3:]:
+            self._slider(look, key, label, lo, hi, step, digits, tip)
+        self._combo(look, "color_mode", "Colour from", MODES,
+                    "Which part of the wallpaper a bar takes its colour from:\n"
+                    "tip = behind the bar's top edge, body = mid-bar, floor = bottom edge.")
+
+        audio = self._group(col, "Audio", "cava settings. Changing these restarts the analyser.")
+        self._entry(audio, "source", "Sink",
+                    "PipeWire sink name to analyse (e.g. easyeffects_sink.monitor), or 'auto'.")
+        self._combo(audio, "fps", "Frame rate", FPS_CHOICES, "cava frame rate.", cast=int)
+        feed = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        flabel = Gtk.Label(label="Spectrum width")
+        flabel.set_xalign(0)
+        flabel.set_hexpand(True)
+        flabel.set_tooltip_text("How many values cava produces (the levels texture width).")
+        feed.append(flabel)
+        spin = Gtk.SpinButton.new_with_range(8, 1024, 8)
+        spin.set_value(self.cfg["feed"])
+        spin.connect("value-changed", lambda s: (self.cfg.__setitem__("feed", int(s.get_value())),
+                                                 self.touch()))
+        feed.append(spin)
+        audio.append(feed)
+
+        wall = self._group(col, "Wallpaper", "Only used to pick the bar colours.")
+        row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        wlabel = Gtk.Label(label="Image")
+        wlabel.set_xalign(0)
+        wlabel.set_hexpand(True)
+        row.append(wlabel)
+        pick = Gtk.Button(label="Choose…")
+        pick.connect("clicked", self._pick_wallpaper)
+        row.append(pick)
+        wall.append(row)
+        wpath = Gtk.Label(label=self.cfg["wallpaper"])
+        wpath.add_css_class("dim-label")
+        wpath.set_ellipsize(Pango.EllipsizeMode.END)
+        wpath.set_xalign(0)
+        wall.append(wpath)
+        self.wpath = wpath
+
+        outs = self._group(col, "Per-output bands",
+                           "Outputs listed here get their own bar count; the rest use Bands.")
+        self.output_box = outs
+        self._rebuild_outputs()
+
+        bottom = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        bottom.set_margin_top(12)
+        reset = Gtk.Button(label="Reset to defaults")
+        reset.connect("clicked", self._reset)
+        bottom.append(reset)
+        col.append(bottom)
+
+    def _rebuild_outputs(self):
+        while (child := self.output_box.get_last_child()) is not None:
+            if getattr(child, "_is_out_row", False) or getattr(child, "_is_out_head", False):
+                self.output_box.remove(child)
+            else:
+                break
+        names = list(self._outputs())
+        for name in names:
+            row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+            row._is_out_row = True
+            label = Gtk.Label(label=name)
+            label.set_xalign(0)
+            label.set_hexpand(True)
+            row.append(label)
+            use = Gtk.CheckButton()
+            use.set_tooltip_text("Override the band count for this output")
+            spin = Gtk.SpinButton.new_with_range(8, 512, 1)
+            cur = self.cfg["outputs"].get(name)
+            enabled = cur is not None
+            use.set_active(enabled)
+            spin.set_value(cur if enabled else self.cfg["bands"])
+            spin.set_sensitive(enabled)
+
+            def on_toggle(chk, n=name, sp=spin):
+                if chk.get_active():
+                    self.cfg["outputs"][n] = int(sp.get_value())
+                    sp.set_sensitive(True)
+                else:
+                    self.cfg["outputs"].pop(n, None)
+                    sp.set_sensitive(False)
+                self.touch()
+
+            def on_spin(sp, n=name, chk=use):
+                if chk.get_active():
+                    self.cfg["outputs"][n] = int(sp.get_value())
+                    self.touch()
+
+            use.connect("toggled", on_toggle)
+            spin.connect("value-changed", on_spin)
+            row.append(use)
+            row.append(spin)
+            self.output_box.append(row)
+
+    def _outputs(self):
+        """Connector names on the live session (niri), else what config knows."""
+        names = []
+        try:
+            out = subprocess.run(["niri", "msg", "outputs"], capture_output=True,
+                                 text=True, timeout=2).stdout
+            for line in out.splitlines():
+                if line.startswith('Output "') and "(" in line and line.endswith(")"):
+                    names.append(line.rsplit("(", 1)[1].rstrip(")"))
+        except Exception:
+            pass
+        for n in self.cfg["outputs"]:
+            if n not in names:
+                names.append(n)
+        return names
+
+    # -- actions ---------------------------------------------------------
+    def _pick_wallpaper(self, _btn):
+        dlg = Gtk.FileDialog()
+        dlg.set_title("Wallpaper used for the bar colours")
+        filt = Gtk.FileFilter()
+        filt.set_name("Images")
+        for pat in ("*.jpg", "*.jpeg", "*.png", "*.webp", "*.avif"):
+            filt.add_pattern(pat)
+        store = Gio.ListStore.new(Gtk.FileFilter)
+        store.append(filt)
+        dlg.set_filters(store)
+
+        def done(d, res):
+            try:
+                f = d.open_finish(res)
+            except GLib.Error:
+                return
+            self.cfg["wallpaper"] = f.get_path()
+            self.wpath.set_text(self.cfg["wallpaper"])
+            self.preview.wallpaper_changed()
+            self.touch()
+
+        dlg.open(None, None, done)
+
+    def _reset(self, _btn):
+        keep = self.cfg["wallpaper"]
+        outputs = dict(self.cfg["outputs"])
+        self.cfg.update({k: v for k, v in DEFAULTS.items() if k not in ("outputs", "wallpaper")})
+        self.cfg["wallpaper"] = keep
+        self.cfg["outputs"] = outputs
+        self._reload_controls()
+        self.touch()
+
+    def _reload_controls(self):
+        self.loading = True
+        for key, row in self.rows.items():
+            try:
+                row.set_(self.cfg[key])
+            except Exception:
+                pass
+        self.loading = False
+        self._rebuild_outputs()
+        self.preview.wallpaper_changed()
+
+    def _restart_bars(self, _btn):
+        subprocess.run(["pkill", "-f", "^" + BIN], check=False)
+        time.sleep(0.2)
+        log = open(LOG, "ab")
+        subprocess.Popen([BIN], stdout=log, stderr=log, start_new_session=True)
+
+    # -- persistence -----------------------------------------------------
+    def touch(self):
+        if self.loading:
+            return
+        if self.pending:
+            GLib.source_remove(self.pending)
+        self.pending = GLib.timeout_add(90, self._flush)
+
+    def _flush(self):
+        self.pending = None
+        try:
+            write_config(self.cfg)
+            self.written_at = time.time()
+        except OSError as exc:
+            sys.stderr.write("wallpaper-bars-config: %s\n" % exc)
+        self.preview.queue_draw()
+        return False
+
+    def watch_config(self, win):
+        try:
+            gfile = Gio.File.new_for_path(CONFIG)
+            self.monitor = gfile.monitor_file(Gio.FileMonitorFlags.NONE, None)
+            self.monitor.connect("changed", self._on_file_changed)
+        except GLib.Error:
+            self.monitor = None
+
+    def _on_file_changed(self, _mon, _f, _other, _etype):
+        if time.time() - getattr(self, "written_at", 0) < 0.6:
+            return
+        GLib.timeout_add(250, self._sync_from_disk)
+
+    def _sync_from_disk(self):
+        disk = read_config()
+        if disk and disk != self.cfg:
+            self.cfg = disk
+            self._reload_controls()
+        return False
+
+
+def main():
+    if not os.path.exists(BIN):
+        sys.stderr.write("wallpaper-bars-config: %s not built (run ./install.sh)\n" % BIN)
+    app = App()
+    try:
+        return app.run(sys.argv)
+    except KeyboardInterrupt:
+        return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
