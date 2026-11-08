@@ -11,12 +11,38 @@ IMG="$(readlink -f "$IMG")"
 
 LINK="$HOME/.config/backgrounds/current-wallpaper"
 
+# The transition is drawn, not chosen from awww's list: wallfx-gpu paints the
+# character's outline over awww and swaps it underneath (see its header). It
+# needs the cut-out maps of the NEW image; `wallfx elige` prepares them once
+# per wallpaper (cached by path/size/date) and notifies while it works. With no
+# character, no maps, or no old image on screen (startup, hotplug), awww changes
+# with a plain fade — the wallpaper must change even if the effect cannot play.
+OLD_IMG="$(awww query 2>/dev/null | sed -n 's/.*currently displaying: image: //p' | head -n1)"
+CHOICE=""
+# Only ask for the cut-out when it can actually be used (there is a previous
+# image on screen): at startup and on a fresh output this would cost seconds
+# and then be thrown away, and the desktop would appear late for nothing.
+if [ -n "$OLD_IMG" ] && [ -f "$OLD_IMG" ] && [ "$(readlink -f "$OLD_IMG")" != "$IMG" ] \
+   && [ -x "$HOME/.local/bin/wallfx" ]; then
+    CHOICE="$("$HOME/.local/bin/wallfx" elige "$IMG" 2>/dev/null || true)"
+fi
+
 PAINTED=0
-if awww img "$IMG" --transition-type random --transition-duration 2 "$@" 2>/dev/null \
-   || awww img "$IMG" "$@" 2>/dev/null; then
-    PAINTED=1
-elif awww query 2>/dev/null | grep -q "image: $IMG"; then
-    PAINTED=1   # already showing this image (awww refuses a no-op re-apply)
+if [ "${CHOICE%% *}" = "perfil" ] && [ -n "$OLD_IMG" ] && [ -f "$OLD_IMG" ] \
+   && [ "$(readlink -f "$OLD_IMG")" != "$IMG" ] \
+   && [ -x "$HOME/.local/bin/wallfx-gpu" ]; then
+    read -r _kind CAMPO LINEA <<<"$CHOICE"
+    if "$HOME/.local/bin/wallfx-gpu" "$OLD_IMG" "$IMG" "$CAMPO" "$LINEA" 2>/dev/null; then
+        PAINTED=1
+    fi
+fi
+if [ "$PAINTED" -eq 0 ]; then
+    if awww img "$IMG" --transition-type fade --transition-duration 0.5 "$@" 2>/dev/null \
+       || awww img "$IMG" "$@" 2>/dev/null; then
+        PAINTED=1
+    elif awww query 2>/dev/null | grep -q "image: $IMG"; then
+        PAINTED=1   # already showing this image (awww refuses a no-op re-apply)
+    fi
 fi
 if [ "$PAINTED" -eq 0 ]; then
     echo "apply-wallpaper: awww did not paint $IMG (is awww-daemon running?)" >&2

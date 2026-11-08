@@ -440,6 +440,34 @@ else
   say "so the cava bars simply do not appear."
 fi
 
+say ""
+WALLFX_SRC="$REPO/wallfx/.local/src/wallfx-gpu"
+say "Building wallfx-gpu (the character-draw wallpaper transition)"
+if [ "$DRY" -eq 1 ]; then
+  say "  would: make -C $WALLFX_SRC && make -C $WALLFX_SRC install"
+  say "  -> installs \$HOME/.local/bin/wallfx-gpu"
+  say "  next: wallfx instalar   (venv + BiRefNet, ~1 GB, once per machine)"
+elif ! command -v make >/dev/null 2>&1 || ! command -v cc >/dev/null 2>&1; then
+  say "  SKIP      no C toolchain (make + cc): install base-devel, then rerun"
+  say "            without it, every wallpaper change is a plain awww fade"
+elif ! pkg-config --exists wayland-client wayland-egl egl glesv2 2>/dev/null; then
+  say "  SKIP      missing dev headers: wayland egl glesv2"
+else
+  if ! make -C "$WALLFX_SRC" >/dev/null; then
+    echo "  ERROR: wallfx-gpu failed to build" >&2
+    exit 1
+  fi
+  make -C "$WALLFX_SRC" install >/dev/null
+  if [ -x "$HOME/.local/bin/wallfx-gpu" ]; then
+    say "  installed ~/.local/bin/wallfx-gpu"
+    say "  needs imagemagick + awww at runtime; the cut-out needs"
+    say "  \`wallfx instalar\` (~1 GB, uv + rembg + BiRefNet), then it works"
+  else
+    echo "  ERROR: wallfx-gpu did not land in ~/.local/bin" >&2
+    exit 1
+  fi
+fi
+
 if [ "$SYSTEM" -eq 1 ]; then
   say ""
   say "Installing /etc/greetd/config.toml (sudo)"

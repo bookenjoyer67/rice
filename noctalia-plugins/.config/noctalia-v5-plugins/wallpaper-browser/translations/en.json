@@ -60,6 +60,7 @@
     "applied": "Applied {id}",
     "apply_failed": "Failed to apply {id}",
     "applying": "Applying {id}\u2026",
+    "preparing": "Preparing {id} \u2014 cutting out its character if the wallpaper is new (a few seconds)\u2026",
     "bad_json": "Unexpected answer from wallhaven",
     "min_res_save_failed": "Could not save the minimum resolution",
     "min_res_saved": "Minimum resolution saved: {value}",

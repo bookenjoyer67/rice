@@ -15,20 +15,6 @@ local pluginDir = noctalia.pluginDir()
 local dataDir = noctalia.pluginDataDir() or "/tmp/noctalia-wallpaper-browser"
 local thumbDir = dataDir .. "/thumbs"
 
-local thumbSet = {}
-
-local function refreshThumbSet()
-    local names = noctalia.listDir(thumbDir)
-    local set = {}
-    if type(names) == "table" then
-        for _, name in ipairs(names) do
-            set[name] = true
-        end
-    end
-    thumbSet = set
-    return set
-end
-
 local cacheDir = (noctalia.expandPath("~/.cache/wallpaper") or "") .. ""
 
 noctalia.mkdirAll(thumbDir)
@@ -404,7 +390,8 @@ local function fetchThumbs(list)
         if thumb == nil and type(it.id) == "string" and it.id:match("^%w%w%w%w+$") then
             thumb = "https://th.wallhaven.cc/lg/" .. it.id:sub(1, 2) .. "/" .. it.id .. ".jpg"
         end
-        if thumb and not thumbSet[it.id .. ".jpg"] then
+        local cached = thumbDir .. "/" .. it.id .. ".jpg"
+        if thumb and not noctalia.fileExists(cached) then
             lines[#lines + 1] = it.id .. "\t" .. thumb
         end
     end
@@ -414,7 +401,6 @@ local function fetchThumbs(list)
     local listFile = dataDir .. "/thumbs.list"
     noctalia.writeFile(listFile, table.concat(lines, "\n") .. "\n")
     noctalia.runAsync({ "bash", pluginDir .. "/thumbs.sh", thumbDir, listFile }, function()
-        refreshThumbSet()
         render()
     end)
 end
@@ -477,7 +463,9 @@ local function apply(it)
         return
     end
     busy = true
-    status = noctalia.tr("status.applying", { id = it.id })
+    -- The cut-out of a new wallpaper happens inside this call (~10-15 s on
+    -- the CPU) and there is no progress callback, so say what the wait is.
+    status = noctalia.tr("status.preparing", { id = it.id })
     render()
     noctalia.runAsync({ "bash", pluginDir .. "/apply.sh", it.id, it.path }, function(res)
         busy = false
@@ -604,18 +592,25 @@ local function pick(it)
 end
 
 local function readIds(path, withStamp)
+    -- One pattern pass over the whole file: a per-line trim() here costs
+    -- hundreds of ms on a 900-line history and blows the callback CPU budget
+    -- before the grid renders.
     local ids = {}
     local ok, text = pcall(noctalia.readFile, path)
-    if ok and type(text) == "string" then
-        for line in text:gmatch("[^\n]+") do
-            local raw = trim(line)
-            local id, stamp = raw, nil
-            if withStamp then
-                id, stamp = raw:match("^(%S+)%s*(%S*)$")
+    if not ok or type(text) ~= "string" then
+        return ids
+    end
+    local PAT = "(%w+)%s*([^\r\n]*)"
+    if withStamp then
+        for id, stamp in text:gmatch(PAT) do
+            if #id >= 4 then
+                ids[#ids + 1] = { id = id, stamp = tonumber(stamp) }
             end
-            id = trim(id or "")
-            if id:match("^%w%w%w%w+$") then
-                ids[#ids + 1] = { id = id, stamp = tonumber(stamp or "") }
+        end
+    else
+        for id in text:gmatch("%w+") do
+            if #id >= 4 then
+                ids[#ids + 1] = { id = id, stamp = 0 }
             end
         end
     end
@@ -737,7 +732,7 @@ end
 
 local function tile(it)
     local path = thumbDir .. "/" .. it.id .. ".jpg"
-    local have = thumbSet[it.id .. ".jpg"] == true
+    local have = noctalia.fileExists(path)
     local isCurrent = currentId ~= nil and currentId == it.id
 
     local preview
@@ -1297,7 +1292,6 @@ function render()
 end
 
 function onOpen()
-    refreshThumbSet()
     currentId = readCurrentId()
     cfg = readSettings()
     nsfwIdx = nsfwIndexFrom(cfg.nsfw)
@@ -1336,6 +1330,5 @@ function onIpc(event, payload)
     end
 end
 
-refreshThumbSet()
 loadFavorites()
 render()
