@@ -28,6 +28,7 @@ import json
 import os
 import re
 import sys
+import time
 
 HOME = os.path.expanduser("~")
 CACHE = os.path.join(HOME, ".cache", "wallfx")
@@ -40,6 +41,7 @@ WIDGET = os.path.join(CACHE, "widget")   # the desktop widget's cut-out PNGs
 FIELD_MAX = 1280    # long side of an outline map (the shader interpolates it)
 SD_RANGE = 16.0     # signed distance stored in +-16 map pixels around the outline
 WIDE = 48.0         # the wide outside distance (the glow), in map pixels
+PERFIL_KEEP = 48    # outline maps kept in the cache; older ones are evicted
 
 
 def _reexec_in_venv():
@@ -63,8 +65,67 @@ def _rgb16(v, extra=None):
 
 
 def _key(img):
-    st = os.stat(img)
-    return hashlib.sha1(f"{os.path.realpath(img)}|{st.st_size}|{int(st.st_mtime)}".encode()).hexdigest()[:16]
+    """Cache key for IMG's outline maps: a digest of its BYTES.
+
+    Content, not path. apply-wallpaper.sh hands `widget` a mktemp copy of the
+    image it just applied, so a path-keyed cache missed on every change: the
+    model ran a second time on identical pixels and the map pair it wrote was
+    orphaned as soon as the temp file was deleted. Hashing the bytes lets the
+    copy hit the entry the real file already made.
+
+    Falls back to the old path identity when the file cannot be read, and
+    still raises OSError for a path that cannot even be stat'ed (callers rely
+    on that to mean "undecidable", not "nobody here").
+    """
+    h = hashlib.sha1()
+    try:
+        with open(img, "rb") as f:
+            for chunk in iter(lambda: f.read(1 << 20), b""):
+                h.update(chunk)
+        return h.hexdigest()[:16]
+    except OSError:
+        st = os.stat(img)
+        return hashlib.sha1(
+            f"{os.path.realpath(img)}|{st.st_size}|{int(st.st_mtime)}".encode()
+        ).hexdigest()[:16]
+
+
+def _prune_perfil(keep=PERFIL_KEEP, min_age=300.0):
+    """Drop the oldest outline maps; keep the newest `keep` entries.
+
+    The cache had no eviction, and the old path keying guaranteed one fresh
+    entry per wallpaper change. Entries younger than `min_age` are never
+    touched: a run that is still writing, or holding its lock, is not stale
+    just because it is not the newest.
+    """
+    d = os.path.join(CACHE, "perfil")
+    try:
+        names = os.listdir(d)
+    except OSError:
+        return
+    newest = {}
+    for name in names:
+        key = name[:16]
+        if len(key) < 16 or any(c not in "0123456789abcdef" for c in key):
+            continue
+        try:
+            mt = os.stat(os.path.join(d, name)).st_mtime
+        except OSError:
+            continue
+        if mt > newest.get(key, 0.0):
+            newest[key] = mt
+    if len(newest) <= keep:
+        return
+    now = time.time()
+    suffixes = ("", ".json", ".lock", "-campo.png", "-linea.png", "-mascara.png")
+    for key, mt in sorted(newest.items(), key=lambda kv: kv[1], reverse=True)[keep:]:
+        if now - mt < min_age:
+            continue
+        for suffix in suffixes:
+            try:
+                os.remove(os.path.join(d, key + suffix))
+            except OSError:
+                pass
 
 
 def _read_meta(path):
@@ -168,6 +229,7 @@ def perfil(img, force=False):
     meta = {"img": img, "ok": ok, "cover": round(cover, 3), "unsure": round(unsure, 3), "w": w, "h": h}
     if not ok:
         json.dump(meta, open(meta_path, "w"))
+        _prune_perfil()
         return None
 
     din = cv2.distanceTransform(b, cv2.DIST_L2, 5)
@@ -251,6 +313,7 @@ def perfil(img, force=False):
         Image.fromarray(arr, mode).save(tmp)
         os.replace(tmp, base + suffix)
     json.dump(meta, open(meta_path, "w"))
+    _prune_perfil()
     return base + "-campo.png", base + "-linea.png"
 
 
