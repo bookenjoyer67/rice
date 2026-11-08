@@ -14,7 +14,8 @@ arrives. That "when" is a map, and this script makes the map; the C client
 
     wallfx perfil IMG                 path to IMG's outline map; exit 1 if
                                       IMG has no clear character
-    wallfx elige NEW                  "perfil <map> <line>" or "none"
+    wallfx elige NEW                  "perfil <map> <line>", "none" (exit 0,
+                                      nobody there), or exit 3 (undecidable)
     wallfx warm [DIR]                 precomputes the outline maps of a folder
     wallfx instalar                   sets up the cut-out (venv + model)
 
@@ -25,6 +26,7 @@ awww fade.
 import hashlib
 import json
 import os
+import re
 import sys
 
 HOME = os.path.expanduser("~")
@@ -33,6 +35,7 @@ VENV = os.path.join(HOME, ".local", "share", "wallfx")
 VENV_PY = os.path.join(VENV, "venv", "bin", "python")
 WALLS = os.path.join(HOME, ".cache", "wallpaper")
 SIN_PERFIL = os.path.join(HOME, ".config", "wallfx", "sin-perfil")
+WIDGET = os.path.join(CACHE, "widget")   # the desktop widget's cut-out PNGs
 
 FIELD_MAX = 1280    # long side of an outline map (the shader interpolates it)
 SD_RANGE = 16.0     # signed distance stored in +-16 map pixels around the outline
@@ -62,6 +65,15 @@ def _rgb16(v, extra=None):
 def _key(img):
     st = os.stat(img)
     return hashlib.sha1(f"{os.path.realpath(img)}|{st.st_size}|{int(st.st_mtime)}".encode()).hexdigest()[:16]
+
+
+def _read_meta(path):
+    """The cached decision, or None when it is missing or truncated."""
+    try:
+        with open(path) as f:
+            return json.load(f)
+    except (OSError, ValueError):
+        return None
 
 
 _session = None
@@ -102,11 +114,12 @@ def perfil(img, force=False):
     base = os.path.join(d, _key(img))
     meta_path = base + ".json"
     if not force and os.path.exists(meta_path):
-        meta = json.load(open(meta_path))
-        if not meta.get("ok"):
-            return None
-        if os.path.exists(base + "-campo.png") and os.path.exists(base + "-linea.png"):
-            return base + "-campo.png", base + "-linea.png"
+        meta = _read_meta(meta_path)
+        if meta is not None:
+            if not meta.get("ok"):
+                return None
+            if os.path.exists(base + "-campo.png") and os.path.exists(base + "-linea.png"):
+                return base + "-campo.png", base + "-linea.png"
     try:
         import cv2
         import numpy as np
@@ -121,11 +134,12 @@ def perfil(img, force=False):
     lock = open(base + ".lock", "w")
     fcntl.flock(lock, fcntl.LOCK_EX)
     if not force and os.path.exists(meta_path):
-        meta = json.load(open(meta_path))
-        if not meta.get("ok"):
-            return None
-        if os.path.exists(base + "-campo.png") and os.path.exists(base + "-linea.png"):
-            return base + "-campo.png", base + "-linea.png"
+        meta = _read_meta(meta_path)
+        if meta is not None:
+            if not meta.get("ok"):
+                return None
+            if os.path.exists(base + "-campo.png") and os.path.exists(base + "-linea.png"):
+                return base + "-campo.png", base + "-linea.png"
 
     im = Image.open(img).convert("RGB")
     im.thumbnail((FIELD_MAX, FIELD_MAX))
@@ -252,6 +266,114 @@ def sin_perfil():
         return set()
 
 
+def widget(img, empty=False):
+    """Write the character cut out of IMG with everything else transparent, for
+    the desktop widget that keeps it on the wallpaper.
+
+    A new file name every time: the shell caches images by path, so rewriting
+    one file would show the old character forever. Old ones are pruned to the
+    last three; the widget polls this directory and shows the newest.
+
+    Returns 0 when a cut-out was written, 1 when the model found nobody (the
+    caller may show nothing), and 2 when IMG or its mask could not be read (the
+    caller must keep the previous cut-out).
+    """
+    import tempfile
+    import time
+    from PIL import Image
+    try:
+        os.makedirs(WIDGET, exist_ok=True)
+    except OSError as e:
+        print(f"wallfx: cannot create {WIDGET}: {e}", file=sys.stderr)
+        return 2
+    ms = int(time.time() * 1000)
+    path = os.path.join(WIDGET, "character-%d.png" % ms)
+    while os.path.exists(path):
+        ms += 1
+        path = os.path.join(WIDGET, "character-%d.png" % ms)
+
+    def write(im):
+        # Write under a name the widget does not pick (it only looks at
+        # character-<ms>.png), then rename into place: a reader sees either no
+        # file or a complete PNG, never a half-written one.
+        fd, tmp = tempfile.mkstemp(prefix=".character-", suffix=".tmp", dir=WIDGET)
+        try:
+            with os.fdopen(fd, "wb") as f:
+                im.save(f, "PNG")
+            os.replace(tmp, path)
+        except BaseException:
+            try:
+                os.remove(tmp)
+            except OSError:
+                pass
+            raise
+
+    if empty:
+        try:
+            write(Image.new("RGBA", (1, 1), (0, 0, 0, 0)))
+        except Exception as e:
+            print(f"wallfx: cannot write the empty cut-out: {e}", file=sys.stderr)
+            return 2
+    else:
+        try:
+            base = os.path.join(CACHE, "perfil", _key(img))
+        except OSError as e:
+            print(f"wallfx: cannot read {img}: {e}", file=sys.stderr)
+            return 2
+        mask = base + "-mascara.png"
+        if not os.path.exists(mask):
+            # Nobody prepared this wallpaper yet (a change with no previous
+            # image on screen never asks for the outline): cut it out now, in
+            # this background shell, so the widget has something to show.
+            try:
+                found = perfil(img)
+            except Exception as e:
+                print(f"wallfx: cannot cut out {img}: {e}", file=sys.stderr)
+                return 2
+            if not found:
+                # A negative decision is cached, so its metadata proves the
+                # model actually looked and found nobody. Without it (missing
+                # dependencies, for instance) we cannot tell, and the old
+                # cut-out must stay.
+                if os.path.exists(base + ".json"):
+                    print("none")
+                    return 1
+                print(f"wallfx: could not analyse {img}", file=sys.stderr)
+                return 2
+        try:
+            im = Image.open(img).convert("RGBA")
+            m = Image.open(mask).convert("L")
+        except (OSError, ValueError) as e:
+            print(f"wallfx: cannot read {img} or its mask: {e}", file=sys.stderr)
+            return 2
+        try:
+            im.thumbnail((1920, 1080), Image.LANCZOS)
+            # the mask is a field at FIELD_MAX; bring it to the picture's size
+            im.putalpha(m.resize(im.size, Image.LANCZOS))
+            write(im)
+        except Exception as e:
+            print(f"wallfx: cannot write the cut-out: {e}", file=sys.stderr)
+            return 2
+    # Keep the last three real cut-outs; ignore temp files and anything else
+    # that may be in the directory.
+    keep = []
+    try:
+        for f in os.listdir(WIDGET):
+            m = re.fullmatch(r"character-(\d+)\.png", f)
+            if m:
+                keep.append((int(m.group(1)), f))
+    except OSError:
+        pass
+    keep.sort()
+    for _, f in keep[:-3]:
+        try:
+            os.remove(os.path.join(WIDGET, f))
+        except OSError:
+            pass
+    print(path)
+    return 0
+
+
 def warm(folder):
     import fcntl
     os.makedirs(CACHE, exist_ok=True)
@@ -296,7 +418,7 @@ def main(argv):
         print(__doc__)
         return 0
     cmd, rest = argv[0], argv[1:]
-    if cmd in ("perfil", "warm"):
+    if cmd in ("perfil", "warm", "widget"):
         _reexec_in_venv()
     if cmd == "perfil":
         r = perfil(rest[0], force="--force" in rest)
@@ -307,25 +429,53 @@ def main(argv):
     if cmd == "warm":
         warm(rest[0] if rest else WALLS)
         return 0
+    if cmd == "widget":
+        # The desktop widget shows this file; --empty writes a transparent one
+        # so a wallpaper with no character leaves nothing behind.
+        if rest and rest[0] == "--empty":
+            return widget(None, empty=True)
+        if not rest:
+            print("usage: wallfx widget IMG | --empty", file=sys.stderr)
+            return 2
+        return widget(rest[0])
     if cmd == "elige":
         # Which transition NEW gets. A wallpaper nobody has prepared yet (just
         # fetched, chosen before the warm-up got to it) is prepared HERE, and
         # the apply path waits: a new wallpaper has to get its outline too.
         # That costs seconds the first time, so it says so.
+        #
+        # Contract: exit 0 + "none" means the model found nobody. Exit 3 with a
+        # reason on stderr means we could not decide, and the caller must leave
+        # the existing cut-out alone.
         img = rest[0]
         if os.path.basename(img) in sin_perfil():
             print("none")
             return 0
-        base = os.path.join(CACHE, "perfil", _key(img))
         try:
-            meta = json.load(open(base + ".json"))
-        except (OSError, ValueError):
-            meta = None
+            base = os.path.join(CACHE, "perfil", _key(img))
+        except OSError as e:
+            print(f"wallfx: cannot read {img}: {e}", file=sys.stderr)
+            return 3
+        meta = _read_meta(base + ".json")
         r = None
         if meta is not None:
-            if meta.get("ok") and os.path.exists(base + "-campo.png") and os.path.exists(base + "-linea.png"):
+            if not meta.get("ok"):
+                print("none")
+                return 0
+            if os.path.exists(base + "-campo.png") and os.path.exists(base + "-linea.png"):
                 r = (base + "-campo.png", base + "-linea.png")
-        elif os.path.exists(VENV_PY) and "--sin-esperar" not in rest:
+            else:
+                print(f"wallfx: {img} is cached as a cut-out but its maps are missing",
+                      file=sys.stderr)
+                return 3
+        elif "--sin-esperar" in rest:
+            print(f"wallfx: no cached decision for {img}", file=sys.stderr)
+            return 3
+        elif not os.path.exists(VENV_PY):
+            print(f"wallfx: cannot cut out {img}: the model venv is missing "
+                  "(run wallfx instalar)", file=sys.stderr)
+            return 3
+        else:
             _reexec_in_venv()
             import signal
             import subprocess
@@ -343,16 +493,23 @@ def main(argv):
             signal.alarm(25)                      # past this, plain fade: the wallpaper must change
             try:
                 r = perfil(img)
-            except Exception:
-                r = None
+            except Exception as e:
+                print(f"wallfx: could not analyse {img}: {e}", file=sys.stderr)
+                return 3
             finally:
                 signal.alarm(0)
                 aviso.cancel()
         if r:
             print("perfil", *r)
-        else:
+            return 0
+        # perfil returned None: a cached negative is a genuine "nobody here";
+        # anything else (missing deps, unreadable image) is undecidable.
+        meta = _read_meta(base + ".json")
+        if meta is not None and not meta.get("ok"):
             print("none")
-        return 0
+            return 0
+        print(f"wallfx: could not decide whether {img} has a character", file=sys.stderr)
+        return 3
     if cmd == "instalar":
         import shutil
         import subprocess

@@ -1,0 +1,4 @@
+wallfx-character
+*-client-protocol.h
+*-protocol.c
+xdg-shell-client-protocol.h

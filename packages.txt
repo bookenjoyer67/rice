@@ -10,6 +10,7 @@ noctalia
 awww
 matugen
 imagemagick
+uv              # the wallpaper cut-out's venv + model (wallfx instalar)
 
 # session / login
 greetd

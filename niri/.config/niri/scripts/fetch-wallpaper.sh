@@ -3,6 +3,7 @@ set -euo pipefail
 
 DER="$(cd "$(dirname "$(readlink -f "$0")")" && pwd)"
 . "$DER/read-settings.sh"
+. "$DER/wallpaper-cache.sh"
 ws_apply
 
 # Overridable so a consumer that only wants an image (e.g. wallhaven-ntp for
@@ -11,9 +12,9 @@ ws_apply
 # every reader of this cache (bars, hotplug healer, swipe-delete) sees image B.
 CACHE_DIR="${WALLPAPER_CACHE_DIR:-$HOME/.cache/wallpaper}"
 mkdir -p "$CACHE_DIR"
+CACHE_DIR="$(readlink -f "$CACHE_DIR" 2>/dev/null || printf '%s' "$CACHE_DIR")"
 REJECTED="$CACHE_DIR/rejected"
 RECENT="$CACHE_DIR/recent"
-STATE_ID="$CACHE_DIR/current.id"
 UA="Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36"
 MIN_BYTES=100000
 MIN_RES="$WS_MIN_RES"
@@ -216,14 +217,6 @@ fi
 mkdir -p "$CACHE_DIR"
 touch "$REJECTED" "$RECENT"
 
-cached() { ls "$CACHE_DIR"/wallpaper.* 2>/dev/null | head -n1; }
-
-remember() {
-    local id="$1"
-    grep -qxF -- "$id" "$RECENT" 2>/dev/null || printf '%s\n' "$id" >> "$RECENT"
-    tail -n 30 "$RECENT" > "$RECENT.tmp" 2>/dev/null && mv "$RECENT.tmp" "$RECENT"
-}
-
 saturation() {
     local im
     if command -v magick >/dev/null 2>&1; then im=magick
@@ -326,33 +319,11 @@ next_candidate() {
     esac
 }
 
-download() {
-    local id="$1" url="$2" ext dest tmp size
-    ext="${url##*.}"; ext="${ext%%\?*}"
-    dest="$CACHE_DIR/wallpaper.$ext"
-    tmp="$dest.part"
-    if ! curl -fsS --max-time 120 -A "$UA" -o "$tmp" "$url"; then
-        rm -f "$tmp"; return 1
-    fi
-    size="$(stat -c %s "$tmp" 2>/dev/null || echo 0)"
-    if [ "$size" -lt "$MIN_BYTES" ]; then
-        rm -f "$tmp"; return 1
-    fi
-    mv -f "$tmp" "$dest"
-    find "$CACHE_DIR" -maxdepth 1 -type f -name 'wallpaper.*' \
-        ! -name "wallpaper.$ext" -delete 2>/dev/null || true
-    printf '%s\n' "$id" > "$STATE_ID"
-    printf '%s\t%s\n' "$id" "$(date +%s)" >> "$CACHE_DIR/history"
-    tail -n 1000 "$CACHE_DIR/history" > "$CACHE_DIR/history.tmp" 2>/dev/null \
-        && mv "$CACHE_DIR/history.tmp" "$CACHE_DIR/history"
-    printf '%s\n' "$dest"
-}
-
 LOCK="$CACHE_DIR/.fetch.lock"
 exec 9>"$LOCK"
 if ! flock -w 25 9; then
     echo "fetch-wallpaper: another fetch is already running" >&2
-    if img="$(cached)" && [ -n "$img" ]; then
+    if img="$(wc_cached)" && [ -n "$img" ]; then
         printf '%s\n' "$img"
         exit 0
     fi
@@ -361,8 +332,30 @@ fi
 
 rm -f "$CACHE_DIR"/wallpaper.*.part 2>/dev/null || true
 
+# The cache reuses one file name (wallpaper.<ext>), so the picture on screen is
+# about to be overwritten. Snapshot it ONCE, before the loop: a too-dull pick
+# rolls again and overwrites wallpaper.<ext> several times, but awww keeps the
+# original until the apply, so copying inside wc_download() would make the final
+# previous.img the second-to-last candidate instead of what is on screen.
+# Take it from what awww reports when that is a cache file (the extension may
+# change, and the old one is deleted); otherwise fall back to the cache entry.
+PREV="$CACHE_DIR/previous.img"
+PREV_SNAP="$CACHE_DIR/.previous.$$.img"
+trap 'rm -f "$PREV_SNAP"' EXIT
+wc_snapshot_previous "$PREV_SNAP" || rm -f "$PREV_SNAP"
+
+# Publish the snapshot only when the fetch is done, so its mtime is close to
+# the new image's (apply-wallpaper.sh ignores an old previous.img).
+finalize_prev() {
+    [ -n "${PREV_SNAP:-}" ] && [ -f "$PREV_SNAP" ] || return 0
+    touch "$PREV_SNAP" 2>/dev/null || true
+    mv -f "$PREV_SNAP" "$PREV" 2>/dev/null || rm -f "$PREV_SNAP"
+}
+
 attempt=0
 chosen=""
+last_id=""
+last_dest=""
 while [ "$attempt" -lt "$MAX_ATTEMPTS" ]; do
     attempt=$((attempt + 1))
     if [ "$attempt" -eq "$MAX_ATTEMPTS" ]; then
@@ -375,13 +368,15 @@ while [ "$attempt" -lt "$MAX_ATTEMPTS" ]; do
 
     id="${entry%%$'\t'*}"
     url="${entry#*$'\t'}"
-    if ! dest="$(download "$id" "$url")"; then
+    if ! dest="$(wc_download "$url" 120)"; then
         continue
     fi
+    last_id="$id"
+    last_dest="$dest"
 
     if vivid_enough "$dest"; then
         chosen="$dest"
-        remember "$id"
+        wc_record "$id"                    # only the image we keep is recorded
         break
     fi
     if [ -n "${WALLPAPER_DEBUG:-}" ]; then
@@ -390,11 +385,18 @@ while [ "$attempt" -lt "$MAX_ATTEMPTS" ]; do
 done
 
 if [ -n "$chosen" ]; then
+    finalize_prev
     printf '%s\n' "$chosen"
     exit 0
 fi
 
-if img="$(cached)" && [ -n "$img" ]; then
+if img="$(wc_cached)" && [ -n "$img" ]; then
+    # Falling back to the last download really does display it; an older cache
+    # entry has no id we can trust, so its state is left untouched.
+    if [ -n "$last_id" ] && [ "$img" = "$last_dest" ]; then
+        wc_record "$last_id"
+    fi
+    finalize_prev
     printf '%s\n' "$img"
     exit 0
 fi

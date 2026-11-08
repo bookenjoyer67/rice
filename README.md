@@ -96,6 +96,13 @@ For the system stage keep `HOME` intact (`sudo env HOME="$HOME" ./install.sh
 --with-system`), otherwise `sudo` rewrites `HOME` to `/root` and the mirroring
 pass lands in the wrong place.
 
+`install.sh` also builds `wallfx-gpu` and, the first time only, sets up the
+wallpaper cut-out (`wallfx instalar`: its own uv venv + the BiRefNet model,
+~1 GB, needs network; `--no-model` skips it). With the model in place, both the
+random-wallpaper key and the wallpaper browser play the character-draw
+transition; without it every change is a plain awww fade. Cached wallpapers are
+cut out in the background at the end of the install.
+
 Reload in place with `niri msg action load-config-file`, or log out and back in.
 
 ---
@@ -108,6 +115,7 @@ Reload in place with `niri msg action load-config-file`, or log out and back in.
 | **Noctalia v5** | Bar on every output, notifications, SNI tray, launcher, control centre, wallpaper picker, OSD |
 | **matugen** | Material 3 palette extraction, rendered into kitty, Neovim and the lock-screen palette |
 | **awww** | Per-output wallpaper daemon |
+| **wallfx** | The wallpaper change is drawn: BiRefNet cuts the character out once, and a small C/EGL layer-shell surface traces its outline, fills it in and spreads the rest of the world out of it (`wallfx/`; plain fade when there is no character) |
 | **tuigreet + greetd** | Text login that `exec`s `niri-session` on tty1; the shipped theme renders the patched "Matrix Peak" background (rainbow wave, hot pink head) |
 | **kitty** | Daily-driver terminal, running fish; alacritty and ghostty ship as alternatives |
 | **swaylock** | Lock screen with a palette-matched backdrop |

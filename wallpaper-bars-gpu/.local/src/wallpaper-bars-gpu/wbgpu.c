@@ -31,13 +31,8 @@
 #include <sys/types.h>
 #include <sys/wait.h>
 
-#include <wayland-client.h>
-#include <wayland-egl.h>
-#include "wlr-layer-shell-unstable-v1-client-protocol.h"
-
-#include <EGL/egl.h>
+#include "wlgl.h"
 #include <EGL/eglext.h>
-#include <GLES3/gl3.h>
 
 #define WALL_TEX_W 1024
 #define WALL_TEX_H 576
@@ -93,6 +88,7 @@ static int    feed_dirty;
 static unsigned ov_mask;
 static double   ov_bands, ov_feed, ov_gap, ov_radius, ov_opac, ov_blur,
                 ov_smooth, ov_idle, ov_sat, ov_lift, ov_minl, ov_fps, ov_mode;
+static char     ov_wallpaper[PATH_MAX];
 
 static int  mode_from_str(const char *s);
 static void logmsg(const char *fmt, ...) __attribute__((format(printf, 1, 2)));
@@ -115,14 +111,7 @@ static double now_ms(void)
 
 /* -------------------------------------------------------------- wayland */
 
-static struct wl_display *wl_dpy;
-static struct wl_registry *wl_reg;
-static struct wl_compositor *wl_comp;
-static struct zwlr_layer_shell_v1 *wl_shell;
-
-static EGLDisplay egl_dpy;
-static EGLContext egl_ctx;
-static EGLConfig  egl_cfg;
+static struct wlgl g;
 
 static GLuint prog, vao;
 static GLuint tex_levels, tex_wall;
@@ -131,20 +120,13 @@ static GLint u_opacity, u_blur, u_layers, u_sat, u_lift, u_minlight, u_mode;
 static int ge_ready;
 
 struct output {
-    struct wl_output *wl;
-    char name[64];
-    int32_t x, y, w, h;
-    struct wl_surface *surf;
-    struct zwlr_layer_surface_v1 *ls;
-    struct wl_egl_window *win;
-    EGLSurface esurf;
-    struct wl_callback *frame_cb;   /* frame in flight, NULL = free to draw */
-    int configured;
+    struct wlgl_output base;        /* must stay first: the registry fills it */
+    struct wlgl_layer layer;
     int bands;              /* 0 = unknown, resolved at render time */
-    struct output *next;
 };
 
-static struct output *outputs;
+#define OUTPUTS ((struct output *)g.outputs)
+#define NEXT(o) ((struct output *)(o)->base.next)
 
 static int bands_for_output(const char *name);   /* settings.toml, defined below */
 
@@ -229,8 +211,20 @@ static const char *FS_SRC =
     "  float coreHalf  = max(0.5, halfBar * (0.45 - 0.32 * u_blur));\n"
     "  float haloExtra = barW * 1.5 * u_blur;\n"
     "\n"
-    "  /* distance outside the solid core, normalised like the widget's rings */\n"
-    "  float dx = max(abs(lx) - coreHalf, 0.0);\n"
+    "  /* rounded corners: narrow the core's half-width at both ends */\n"
+    "  float rad = clamp(u_radius, 0.0, min(coreHalf, h * 0.5));\n"
+    "  float halfCore = coreHalf;\n"
+    "  float yTop = gl_FragCoord.y - (h - rad);\n"
+    "  if (yTop > 0.0) {\n"
+    "    float yy = min(yTop, rad);\n"
+    "    halfCore = min(halfCore, (coreHalf - rad) + sqrt(max(rad * rad - yy * yy, 0.0)));\n"
+    "  }\n"
+    "  float yBot = rad - gl_FragCoord.y;\n"
+    "  if (yBot > 0.0) {\n"
+    "    float yy = min(yBot, rad);\n"
+    "    halfCore = min(halfCore, (coreHalf - rad) + sqrt(max(rad * rad - yy * yy, 0.0)));\n"
+    "  }\n"
+    "  float dx = max(abs(lx) - halfCore, 0.0);\n"
     "  float dy = max(gl_FragCoord.y - h, 0.0);\n"
     "  float t;\n"
     "  if (haloExtra > 0.5 || vspread > 0.5) {\n"
@@ -273,40 +267,9 @@ static const char *FS_SRC =
     "  fragColor = vec4(col * alpha, alpha);\n"
     "}\n";
 
-static GLuint compile(GLenum type, const char *src)
-{
-    GLuint s = glCreateShader(type);
-    glShaderSource(s, 1, &src, NULL);
-    glCompileShader(s);
-    GLint ok = 0;
-    glGetShaderiv(s, GL_COMPILE_STATUS, &ok);
-    if (!ok) {
-        char buf[4096];
-        glGetShaderInfoLog(s, sizeof buf, NULL, buf);
-        logmsg("shader compile failed: %s", buf);
-        exit(1);
-    }
-    return s;
-}
-
 static void gpu_init(void)
 {
-    GLuint vs = compile(GL_VERTEX_SHADER, VS_SRC);
-    GLuint fs = compile(GL_FRAGMENT_SHADER, FS_SRC);
-    prog = glCreateProgram();
-    glAttachShader(prog, vs);
-    glAttachShader(prog, fs);
-    glLinkProgram(prog);
-    GLint ok = 0;
-    glGetProgramiv(prog, GL_LINK_STATUS, &ok);
-    if (!ok) {
-        char buf[4096];
-        glGetProgramInfoLog(prog, sizeof buf, NULL, buf);
-        logmsg("program link failed: %s", buf);
-        exit(1);
-    }
-    glDeleteShader(vs);
-    glDeleteShader(fs);
+    prog = wlgl_program(&g, VS_SRC, FS_SRC);
 
     u_res      = glGetUniformLocation(prog, "u_res");
     u_levels   = glGetUniformLocation(prog, "u_levels");
@@ -350,34 +313,6 @@ static void gpu_init(void)
 
 static time_t wall_mtime = -1;
 
-static int read_fd_all(int fd, unsigned char **out, size_t *outlen)
-{
-    size_t cap = 1 << 20, len = 0;
-    unsigned char *buf = malloc(cap);
-    if (!buf)
-        return -1;
-    for (;;) {
-        if (len == cap) {
-            cap *= 2;
-            unsigned char *nb = realloc(buf, cap);
-            if (!nb) { free(buf); return -1; }
-            buf = nb;
-        }
-        ssize_t n = read(fd, buf + len, cap - len);
-        if (n < 0) {
-            if (errno == EINTR)
-                continue;
-            break;
-        }
-        if (n == 0)
-            break;
-        len += (size_t)n;
-    }
-    *out = buf;
-    *outlen = len;
-    return 0;
-}
-
 /* Decode the wallpaper to a small RGBA buffer with magick (a dependency the
  * old plugin already required) and upload it. Sampled in the shader, so the
  * on-GPU texture can be small without visible loss. */
@@ -392,30 +327,12 @@ static void wallpaper_reload(void)
     if (st.st_mtime == wall_mtime)
         return;
 
-    int pf[2];
-    if (pipe(pf) != 0)
-        return;
-    pid_t pid = fork();
-    if (pid == 0) {
-        dup2(pf[1], STDOUT_FILENO);
-        close(pf[0]);
-        close(pf[1]);
-        int devnull = open("/dev/null", O_WRONLY);
-        if (devnull >= 0)
-            dup2(devnull, STDERR_FILENO);
-        char size[64];
-        snprintf(size, sizeof size, "%dx%d!", WALL_TEX_W, WALL_TEX_H);
-        execlp("magick", "magick", resolved, "-resize", size, "-depth", "8",
-               "rgba:-", (char *)NULL);
-        _exit(127);
-    }
-    close(pf[1]);
+    char size[64];
+    snprintf(size, sizeof size, "%dx%d!", WALL_TEX_W, WALL_TEX_H);
     unsigned char *buf = NULL;
     size_t len = 0;
-    read_fd_all(pf[0], &buf, &len);
-    close(pf[0]);
-    int status = 0;
-    waitpid(pid, &status, 0);
+    if (wlgl_magick_rgba(resolved, size, &buf, &len) < 0)
+        len = 0;
 
     size_t want = (size_t)WALL_TEX_W * WALL_TEX_H * 4;
     if (len < want) {
@@ -543,147 +460,37 @@ static int cava_pump(void)
 
 static void render(struct output *o);
 
-static void ls_configure(void *data, struct zwlr_layer_surface_v1 *ls,
-                         uint32_t serial, uint32_t w, uint32_t h)
+static void layer_configured(struct wlgl_layer *l)
 {
-    struct output *o = data;
-    zwlr_layer_surface_v1_ack_configure(ls, serial);
-    if (w == 0 || h == 0)
-        return;
-    if (o->configured && (int)w == o->w && (int)h == o->h && o->win) {
-        render(o);
-        return;
-    }
-    if (o->win)
-        wl_egl_window_resize(o->win, (int)w, (int)h, 0, 0);
-    else {
-        o->win = wl_egl_window_create(o->surf, (int)w, (int)h);
-        if (!o->win) {
-            logmsg("%s: wl_egl_window_create failed", o->name);
-            return;
-        }
-        o->esurf = eglCreateWindowSurface(egl_dpy, egl_cfg, (EGLNativeWindowType)o->win, NULL);
-        if (o->esurf == EGL_NO_SURFACE) {
-            logmsg("%s: eglCreateWindowSurface failed (0x%x)", o->name, eglGetError());
-            return;
-        }
-    }
-    o->w = (int32_t)w;
-    o->h = (int32_t)h;
-    o->configured = 1;
-    logmsg("%s: %dx%d", o->name, o->w, o->h);
+    struct output *o = l->user;
+    logmsg("%s: %dx%d", o->base.name, l->w, l->h);
     render(o);
 }
 
-static void ls_closed(void *data, struct zwlr_layer_surface_v1 *ls)
+static void layer_closed(struct wlgl_layer *l)
 {
-    (void)data;
-    zwlr_layer_surface_v1_destroy(ls);
+    zwlr_layer_surface_v1_destroy(l->ls);
     logmsg("compositor closed a layer surface; exiting");
     exit(0);
 }
 
-static const struct zwlr_layer_surface_v1_listener ls_listener = {
-    .configure = ls_configure,
-    .closed = ls_closed,
+static const struct wlgl_layer_hooks layer_hooks = {
+    .configured = layer_configured,
+    .closed = layer_closed,
 };
 
 static void create_surface(struct output *o)
 {
-    if (cfg_only_output[0] && strcmp(cfg_only_output, o->name) != 0)
+    if (cfg_only_output[0] && strcmp(cfg_only_output, o->base.name) != 0)
         return;
-    logmsg("create_surface for output '%s'", o->name);
-    o->surf = wl_compositor_create_surface(wl_comp);
-    if (!o->surf)
-        return;
-    /* click-through: an empty input region means the layer never eats input */
-    struct wl_region *empty = wl_compositor_create_region(wl_comp);
-    wl_surface_set_input_region(o->surf, empty);
-    wl_region_destroy(empty);
-
-    o->ls = zwlr_layer_shell_v1_get_layer_surface(wl_shell, o->surf, o->wl,
-                                                  ZWLR_LAYER_SHELL_V1_LAYER_BOTTOM,
-                                                  "wallpaper-bars-gpu");
-    zwlr_layer_surface_v1_set_anchor(o->ls, ZWLR_LAYER_SURFACE_V1_ANCHOR_TOP |
-                                             ZWLR_LAYER_SURFACE_V1_ANCHOR_BOTTOM |
-                                             ZWLR_LAYER_SURFACE_V1_ANCHOR_LEFT |
-                                             ZWLR_LAYER_SURFACE_V1_ANCHOR_RIGHT);
-    zwlr_layer_surface_v1_set_size(o->ls, 0, 0);
-    zwlr_layer_surface_v1_set_exclusive_zone(o->ls, 0);
-    zwlr_layer_surface_v1_set_keyboard_interactivity(o->ls, 0);
-    zwlr_layer_surface_v1_add_listener(o->ls, &ls_listener, o);
-    wl_surface_commit(o->surf);
+    logmsg("create_surface for output '%s'", o->base.name);
+    /* The bars are decoration on the wallpaper; only the background layer can
+     * be placed within the overview backdrop (niri's place-within-backdrop
+     * rule requires a background-layer surface that ignores exclusive zones). */
+    wlgl_create_layer(&g, &o->base, &o->layer, 0,
+                      ZWLR_LAYER_SHELL_V1_LAYER_BACKGROUND, "wallpaper-bars-gpu",
+                      0, 0, &layer_hooks, o);
 }
-
-/* ------------------------------------------------------------------ input */
-
-static void out_geometry(void *data, struct wl_output *wl, int32_t x, int32_t y,
-                         int32_t pw, int32_t ph, int32_t subpixel,
-                         const char *make, const char *model, int32_t transform)
-{
-    (void)wl; (void)pw; (void)ph; (void)subpixel; (void)make; (void)model; (void)transform;
-    struct output *o = data;
-    o->x = x;
-    o->y = y;
-}
-
-static void out_mode(void *data, struct wl_output *wl, uint32_t flags,
-                     int32_t w, int32_t h, int32_t refresh)
-{
-    (void)wl; (void)flags; (void)refresh;
-    struct output *o = data;
-    if (w > 0 && h > 0) {
-        o->w = w;
-        o->h = h;
-    }
-}
-
-static void out_done(void *data, struct wl_output *wl) { (void)data; (void)wl; }
-static void out_scale(void *data, struct wl_output *wl, int32_t f) { (void)data; (void)wl; (void)f; }
-static void out_name(void *data, struct wl_output *wl, const char *name)
-{
-    (void)wl;
-    struct output *o = data;
-    snprintf(o->name, sizeof o->name, "%s", name);
-}
-static void out_desc(void *data, struct wl_output *wl, const char *d) { (void)data; (void)wl; (void)d; }
-
-static const struct wl_output_listener out_listener = {
-    .geometry = out_geometry,
-    .mode = out_mode,
-    .done = out_done,
-    .scale = out_scale,
-    .name = out_name,
-    .description = out_desc,
-};
-
-static void reg_global(void *data, struct wl_registry *reg, uint32_t name,
-                       const char *iface, uint32_t ver)
-{
-    (void)data;
-    if (strcmp(iface, wl_compositor_interface.name) == 0) {
-        wl_comp = wl_registry_bind(reg, name, &wl_compositor_interface, 4);
-    } else if (strcmp(iface, zwlr_layer_shell_v1_interface.name) == 0) {
-        wl_shell = wl_registry_bind(reg, name, &zwlr_layer_shell_v1_interface, 1);
-    } else if (strcmp(iface, wl_output_interface.name) == 0) {
-        uint32_t v = ver < 4 ? ver : 4;
-        struct output *o = calloc(1, sizeof *o);
-        o->wl = wl_registry_bind(reg, name, &wl_output_interface, v);
-        o->next = outputs;
-        outputs = o;
-        wl_output_add_listener(o->wl, &out_listener, o);
-    }
-}
-
-static void reg_remove(void *data, struct wl_registry *reg, uint32_t name)
-{
-    (void)data; (void)reg; (void)name;
-}
-
-static const struct wl_registry_listener reg_listener = {
-    .global = reg_global,
-    .global_remove = reg_remove,
-};
 
 /* ------------------------------------------------------------------- draw */
 
@@ -696,7 +503,7 @@ static void frame_done(void *data, struct wl_callback *cb, uint32_t t)
     (void)t;
     struct output *o = data;
     wl_callback_destroy(cb);
-    o->frame_cb = NULL;
+    o->layer.frame_cb = NULL;
     redraw_req = 1;
 }
 
@@ -704,23 +511,23 @@ static const struct wl_callback_listener frame_cb_listener = { .done = frame_don
 
 static void render(struct output *o)
 {
-    if (!ge_ready || !o->configured || !o->esurf)
+    if (!ge_ready || !o->layer.configured || !o->layer.esurf)
         return;
     /* One frame in flight per output. Without this, a surface the compositor
      * is not presenting (covered by a fullscreen video, or its output busy)
      * never gets its buffer back and eglSwapBuffers blocks for ~1s, which
      * serialises the whole loop and leaves the bars a second behind the audio. */
-    if (o->frame_cb)
+    if (o->layer.frame_cb)
         return;
-    if (eglMakeCurrent(egl_dpy, o->esurf, o->esurf, egl_ctx) == EGL_FALSE) {
-        logmsg("%s: eglMakeCurrent failed (0x%x)", o->name, eglGetError());
+    if (eglMakeCurrent(g.egl_dpy, o->layer.esurf, o->layer.esurf, g.egl_ctx) == EGL_FALSE) {
+        logmsg("%s: eglMakeCurrent failed (0x%x)", o->base.name, eglGetError());
         return;
     }
-    int32_t w = o->w, h = o->h;
+    int32_t w = o->layer.w, h = o->layer.h;
     if (w <= 0 || h <= 0)
         return;
     if (o->bands <= 0)
-        o->bands = bands_for_output(o->name);
+        o->bands = bands_for_output(o->base.name);
 
     glViewport(0, 0, w, h);
     glDisable(GL_SCISSOR_TEST);
@@ -778,7 +585,7 @@ static void render(struct output *o)
             inside = on;
         }
         logmsg("%s: selftest row A>25 -> %d bands, widest run %d px, width %d",
-               o->name, runs, maxrun, w);
+               o->base.name, runs, maxrun, w);
         /* glow / tip profile at the middle of the widest band */
         int nb = o->bands > 0 ? o->bands : cfg_bands;
         int cx = (int)((nb / 2 + 0.5) * (double)w / nb);   /* centre of one bar, not a gap */
@@ -794,18 +601,18 @@ static void render(struct output *o)
         unsigned char px[4] = {0, 0, 0, 0};
         glReadPixels(w / 2, 4, 1, 1, GL_RGBA, GL_UNSIGNED_BYTE, px);
         logmsg("%s: readback bottom-centre rgba=%u,%u,%u,%u  err=0x%x",
-               o->name, px[0], px[1], px[2], px[3], glGetError());
+               o->base.name, px[0], px[1], px[2], px[3], glGetError());
     }
     /* ask for the presentation callback BEFORE the commit inside swap;
      * while it is outstanding this output is skipped (see render()) */
-    o->frame_cb = wl_surface_frame(o->surf);
-    wl_callback_add_listener(o->frame_cb, &frame_cb_listener, o);
-    eglSwapBuffers(egl_dpy, o->esurf);
+    o->layer.frame_cb = wl_surface_frame(o->layer.surf);
+    wl_callback_add_listener(o->layer.frame_cb, &frame_cb_listener, o);
+    eglSwapBuffers(g.egl_dpy, o->layer.esurf);
 }
 
 static void render_all(void)
 {
-    for (struct output *o = outputs; o; o = o->next)
+    for (struct output *o = OUTPUTS; o; o = NEXT(o))
         render(o);
 }
 
@@ -903,6 +710,7 @@ static void parse_args(int argc, char **argv)
             i++;
         } else if (!strcmp(a, "--wallpaper") && v) {
             snprintf(cfg_wallpaper, sizeof cfg_wallpaper, "%s", v);
+            snprintf(ov_wallpaper, sizeof ov_wallpaper, "%s", v);
             cfg_wall_explicit = 1;
             i++;
         } else if (!strcmp(a, "--demo")) {
@@ -1149,6 +957,7 @@ static int config_parse(const char *path)
         return -1;
 
     char line[1024], section[192] = "";
+    map_n = 0;                  /* a live reload must not append duplicates */
 
     while (fgets(line, sizeof line, f)) {
         char *t = trim(line);
@@ -1379,6 +1188,8 @@ static void apply_overrides(void)
     if (ov_mask & OV_MINL)   cfg_minlight = ov_minl;
     if (ov_mask & OV_FPS)    cfg_fps = (int)ov_fps;
     if (ov_mask & OV_MODE)   cfg_color_mode = (int)ov_mode;
+    if (cfg_wall_explicit)
+        snprintf(cfg_wallpaper, sizeof cfg_wallpaper, "%s", ov_wallpaper);
     if (cfg_bands < 8) cfg_bands = 8;
     if (cfg_bands > 512) cfg_bands = 512;
     if (cfg_feed < 8) cfg_feed = 8;
@@ -1412,6 +1223,8 @@ static int config_apply(void)
 
     if (config_parse(cfg_config) != 0)
         return 0;
+    if (cfg_wall_explicit)
+        snprintf(cfg_wallpaper, sizeof cfg_wallpaper, "%s", ov_wallpaper);
 
     int changed = 0;
     if (cfg_feed != old_feed) {
@@ -1437,7 +1250,7 @@ static int config_apply(void)
             map_changed = 1;
     }
     if (cfg_bands != old_bands || map_changed) {
-        for (struct output *o = outputs; o; o = o->next)
+        for (struct output *o = OUTPUTS; o; o = NEXT(o))
             o->bands = 0;
         changed = 1;
     }
@@ -1451,47 +1264,13 @@ static int config_apply(void)
     return changed;
 }
 
-static void egl_boot(void)
-{
-    egl_dpy = eglGetPlatformDisplay(EGL_PLATFORM_WAYLAND_KHR, wl_dpy, NULL);
-    if (egl_dpy == EGL_NO_DISPLAY) {
-        logmsg("no EGL display");
-        exit(1);
-    }
-    EGLint major = 0, minor = 0;
-    if (!eglInitialize(egl_dpy, &major, &minor)) {
-        logmsg("eglInitialize failed (0x%x)", eglGetError());
-        exit(1);
-    }
-    if (!eglBindAPI(EGL_OPENGL_ES_API)) {
-        logmsg("eglBindAPI failed");
-        exit(1);
-    }
-    const EGLint cfg_attr[] = {
-        EGL_SURFACE_TYPE, EGL_WINDOW_BIT | EGL_PBUFFER_BIT,
-        EGL_RENDERABLE_TYPE, EGL_OPENGL_ES3_BIT,
-        EGL_RED_SIZE, 8, EGL_GREEN_SIZE, 8, EGL_BLUE_SIZE, 8, EGL_ALPHA_SIZE, 8,
-        EGL_NONE,
-    };
-    EGLint n = 0;
-    if (!eglChooseConfig(egl_dpy, cfg_attr, &egl_cfg, 1, &n) || n < 1) {
-        logmsg("no matching EGL config");
-        exit(1);
-    }
-    const EGLint ctx_attr[] = { EGL_CONTEXT_CLIENT_VERSION, 3, EGL_NONE };
-    egl_ctx = eglCreateContext(egl_dpy, egl_cfg, EGL_NO_CONTEXT, ctx_attr);
-    if (egl_ctx == EGL_NO_CONTEXT) {
-        logmsg("eglCreateContext failed (0x%x)", eglGetError());
-        exit(1);
-    }
-    logmsg("EGL %d.%d", major, minor);
-}
-
 static volatile sig_atomic_t quit;
 static void on_signal(int sig) { (void)sig; quit = 1; }
 
 int main(int argc, char **argv)
 {
+    wlgl_init(&g, "wallpaper-bars-gpu", logmsg);
+    g.output_size = sizeof(struct output);
     signal(SIGPIPE, SIG_IGN);
     signal(SIGTERM, on_signal);
     signal(SIGINT, on_signal);
@@ -1512,44 +1291,30 @@ int main(int argc, char **argv)
         targets[i] = 0.f;
     }
 
-    wl_dpy = wl_display_connect(NULL);
-    if (!wl_dpy) {
+    int wl_rc = wlgl_connect(&g);
+    if (wl_rc == -1) {
         logmsg("cannot connect to WAYLAND_DISPLAY");
         return 1;
     }
-    wl_reg = wl_display_get_registry(wl_dpy);
-    wl_registry_add_listener(wl_reg, &reg_listener, NULL);
-    wl_display_roundtrip(wl_dpy);
-    wl_display_roundtrip(wl_dpy);
-    if (!wl_comp || !wl_shell) {
+    if (wl_rc != 0) {
         logmsg("compositor lacks wl_compositor / zwlr_layer_shell_v1");
         return 1;
     }
 
-    egl_boot();
     /* one context is enough: each surface is made current for its own draw */
-    if (!eglMakeCurrent(egl_dpy, EGL_NO_SURFACE, EGL_NO_SURFACE, egl_ctx)) {
-        /* no surfaceless support: park the context on a 1x1 pbuffer so
-         * textures can be created and uploaded before any surface exists */
-        const EGLint pb[] = { EGL_WIDTH, 1, EGL_HEIGHT, 1, EGL_NONE };
-        EGLSurface tmp = eglCreatePbufferSurface(egl_dpy, egl_cfg, pb);
-        if (tmp == EGL_NO_SURFACE || !eglMakeCurrent(egl_dpy, tmp, tmp, egl_ctx)) {
-            logmsg("cannot make an EGL context current (0x%x)", eglGetError());
-            return 1;
-        }
-    }
+    wlgl_egl_boot(&g);
     gpu_init();
     logmsg("GL %s", glGetString(GL_RENDERER));
     wallpaper_reload();
 
-    for (struct output *o = outputs; o; o = o->next)
+    for (struct output *o = OUTPUTS; o; o = NEXT(o))
         create_surface(o);
-    wl_display_roundtrip(wl_dpy);
+    wl_display_roundtrip(g.dpy);
 
     /* Fallback: outputs may have been announced after our first roundtrip. */
-    if (!outputs) {
+    if (!g.outputs) {
         logmsg("no wl_output yet, retrying");
-        wl_display_roundtrip(wl_dpy);
+        wl_display_roundtrip(g.dpy);
     }
 
     if (!cfg_demo)
@@ -1588,30 +1353,30 @@ int main(int argc, char **argv)
             timeout = 16;
         }
 
-        while (wl_display_prepare_read(wl_dpy) != 0)
-            wl_display_dispatch_pending(wl_dpy);
-        wl_display_flush(wl_dpy);
+        while (wl_display_prepare_read(g.dpy) != 0)
+            wl_display_dispatch_pending(g.dpy);
+        wl_display_flush(g.dpy);
 
         struct pollfd pf[2] = {
-            { .fd = wl_display_get_fd(wl_dpy), .events = POLLIN },
+            { .fd = wl_display_get_fd(g.dpy), .events = POLLIN },
             { .fd = cava_fd, .events = POLLIN },
         };
         int nfd = cfg_demo ? 1 : 2;
         int pr = poll(pf, (nfds_t)nfd, (int)timeout);
         if (pr < 0 && errno != EINTR) {
-            wl_display_cancel_read(wl_dpy);
+            wl_display_cancel_read(g.dpy);
             logmsg("poll: %s", strerror(errno));
             break;
         }
         int dirty = cfg_demo || cfg_changed;
         if (pr > 0 && (pf[0].revents & POLLIN)) {
-            if (wl_display_read_events(wl_dpy) != 0) {
+            if (wl_display_read_events(g.dpy) != 0) {
                 logmsg("wayland connection lost");
                 break;
             }
-            wl_display_dispatch_pending(wl_dpy);
+            wl_display_dispatch_pending(g.dpy);
         } else {
-            wl_display_cancel_read(wl_dpy);
+            wl_display_cancel_read(g.dpy);
         }
         if (redraw_req) {   /* an output's frame callback came back */
             redraw_req = 0;

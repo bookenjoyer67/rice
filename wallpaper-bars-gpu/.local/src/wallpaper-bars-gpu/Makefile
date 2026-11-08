@@ -1,7 +1,11 @@
 CC      ?= gcc
 CFLAGS  ?= -O2 -Wall -Wextra -Wno-unused-parameter
+WLGL_DIR := ../../../../wlgl
+WLGL_C   := $(WLGL_DIR)/wlgl.c
+WLGL_H   := $(WLGL_DIR)/wlgl.h
+
 PKGS    := wayland-client wayland-egl egl glesv2
-CFLAGS  += $(shell pkg-config --cflags $(PKGS))
+CFLAGS  += $(shell pkg-config --cflags $(PKGS)) -I. -I$(WLGL_DIR)
 LDLIBS  += $(shell pkg-config --libs $(PKGS)) -lm
 
 XSDG_XML := /usr/share/wayland-protocols/stable/xdg-shell/xdg-shell.xml
@@ -28,8 +32,8 @@ $(XDG_H): $(XSDG_XML)
 $(XDG_C): $(XSDG_XML)
 	wayland-scanner private-code $< $@
 
-$(TARGET): wbgpu.c $(GEN)
-	$(CC) $(CFLAGS) -o $@ wbgpu.c $(WLR_C) $(XDG_C) $(LDLIBS)
+$(TARGET): wbgpu.c $(WLGL_C) $(WLGL_H) $(GEN)
+	$(CC) $(CFLAGS) -o $@ wbgpu.c $(WLGL_C) $(WLR_C) $(XDG_C) $(LDLIBS)
 
 install: $(TARGET)
 	install -Dm755 $(TARGET) $(HOME)/.local/bin/$(TARGET)

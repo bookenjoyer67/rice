@@ -4,7 +4,7 @@ shopt -s nullglob
 
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 TS="$(date +%Y%m%d-%H%M%S)"
-DRY=0; SYSTEM=0; SHIM=1; DEPS=1; BARS=1
+DRY=0; SYSTEM=0; SHIM=1; DEPS=1; BARS=1; MODEL=1
 
 usage() {
   cat <<'EOF'
@@ -19,6 +19,8 @@ first, so nothing is ever destroyed.
   ./install.sh --no-deps       do not install packages (configs only)
   ./install.sh --no-shim       skip compiling noctalia-layer-swap.so
   ./install.sh --no-bars       skip compiling wallpaper-bars-gpu
+  ./install.sh --no-model      skip the wallpaper cut-out model (venv + BiRefNet, ~1 GB);
+                               without it every wallpaper change is a plain awww fade
   ./install.sh --with-system   also install /etc/greetd/config.toml (needs sudo)
 
 Package lists: packages.txt (official repos) and aur-packages.txt (brave-bin,
@@ -37,6 +39,7 @@ for arg in "$@"; do
     --no-shim)      SHIM=0 ;;
     --build-bars)   BARS=1 ;;
     --no-bars)      BARS=0 ;;
+    --no-model)     MODEL=0 ;;
     --no-deps)      DEPS=0 ;;
     --with-system)  SYSTEM=1 ;;
     -h|--help)      usage ;;
@@ -445,8 +448,9 @@ WALLFX_SRC="$REPO/wallfx/.local/src/wallfx-gpu"
 say "Building wallfx-gpu (the character-draw wallpaper transition)"
 if [ "$DRY" -eq 1 ]; then
   say "  would: make -C $WALLFX_SRC && make -C $WALLFX_SRC install"
-  say "  -> installs \$HOME/.local/bin/wallfx-gpu"
-  say "  next: wallfx instalar   (venv + BiRefNet, ~1 GB, once per machine)"
+  say "  -> installs \$HOME/.local/bin/wallfx-gpu, links \$HOME/.local/bin/wallfx"
+  say "  would: wallfx instalar   (venv + BiRefNet, ~1 GB, only if missing)"
+  say "  would: wallfx warm ~/.cache/wallpaper   (pre-cut what is cached)"
 elif ! command -v make >/dev/null 2>&1 || ! command -v cc >/dev/null 2>&1; then
   say "  SKIP      no C toolchain (make + cc): install base-devel, then rerun"
   say "            without it, every wallpaper change is a plain awww fade"
@@ -458,14 +462,74 @@ else
     exit 1
   fi
   make -C "$WALLFX_SRC" install >/dev/null
-  if [ -x "$HOME/.local/bin/wallfx-gpu" ]; then
-    say "  installed ~/.local/bin/wallfx-gpu"
-    say "  needs imagemagick + awww at runtime; the cut-out needs"
-    say "  \`wallfx instalar\` (~1 GB, uv + rembg + BiRefNet), then it works"
-  else
+  if [ ! -x "$HOME/.local/bin/wallfx-gpu" ]; then
     echo "  ERROR: wallfx-gpu did not land in ~/.local/bin" >&2
     exit 1
   fi
+  say "  installed ~/.local/bin/wallfx-gpu"
+  if [ ! -x "$HOME/.local/bin/wallfx" ]; then
+    say "  ERROR: ~/.local/bin/wallfx missing (the wallfx/ package did not link)" >&2
+    exit 1
+  fi
+  say "  ok        ~/.local/bin/wallfx (the cut-out + maps)"
+
+  # The model is what makes a wallpaper get its outline. It lives in its own
+  # venv (~1 GB: python, rembg, onnxruntime, opencv) so the system python is
+  # never touched, and it is only fetched once per machine.
+  if [ "$MODEL" -eq 0 ]; then
+    say "  skip      cut-out model (--no-model): every change will be a plain fade"
+  elif [ ! -x "$HOME/.local/bin/wallfx" ]; then
+    say "  skip      cut-out model: wallfx is not installed"
+  elif [ ! -x "$HOME/.local/share/wallfx/venv/bin/python" ]; then
+    if ! command -v uv >/dev/null 2>&1; then
+      say "  SKIP      cut-out model: uv is missing (pacman -S uv), plain fades for now"
+      say "            later: wallfx instalar"
+    else
+      say "  setup     cut-out model: wallfx instalar (~1 GB, downloads BiRefNet)"
+      if "$HOME/.local/bin/wallfx" instalar >/dev/null 2>&1; then
+        say "  ok        cut-out model installed"
+      else
+        say "  WARN      wallfx instalar failed — rerun it by hand; plain fades until then"
+      fi
+    fi
+  else
+    say "  ok        cut-out venv already present"
+  fi
+
+  # Cut out what is already on disk so the first switch after login plays.
+  if [ -x "$HOME/.local/bin/wallfx" ] && [ -d "$HOME/.cache/wallpaper" ]; then
+    if [ "$DRY" -eq 1 ]; then
+      say "  would: wallfx warm ~/.cache/wallpaper (background)"
+    else
+      nohup "$HOME/.local/bin/wallfx" warm "$HOME/.cache/wallpaper" \
+        >/dev/null 2>&1 &
+      say "  warm      cutting out the cached wallpaper in the background"
+    fi
+  fi
+fi
+
+say ""
+CHAR_SRC="$REPO/wallfx/.local/src/wallfx-character"
+say "Building wallfx-character (the wallpaper's character on the desktop)"
+if [ "$DRY" -eq 1 ]; then
+  say "  would: make -C $CHAR_SRC && make -C $CHAR_SRC install"
+  say "  -> installs \$HOME/.local/bin/wallfx-character"
+elif ! command -v make >/dev/null 2>&1 || ! command -v cc >/dev/null 2>&1; then
+  say "  SKIP      no C toolchain (make + cc): install base-devel, then rerun"
+  say "            without it the cut-out stays a Noctalia widget"
+elif ! pkg-config --exists wayland-client wayland-egl egl glesv2 2>/dev/null; then
+  say "  SKIP      missing dev headers: wayland egl glesv2"
+else
+  if ! make -C "$CHAR_SRC" >/dev/null; then
+    echo "  ERROR: wallfx-character failed to build" >&2
+    exit 1
+  fi
+  make -C "$CHAR_SRC" install >/dev/null
+  if [ ! -x "$HOME/.local/bin/wallfx-character" ]; then
+    echo "  ERROR: wallfx-character did not land in ~/.local/bin" >&2
+    exit 1
+  fi
+  say "  installed ~/.local/bin/wallfx-character"
 fi
 
 if [ "$SYSTEM" -eq 1 ]; then
@@ -506,3 +570,8 @@ say "  1. Log out and back in — or reload in place:  niri msg action load-conf
 say "  2. Runtime deps:  niri noctalia matugen awww tuigreet kitty cliphist cava imagemagick"
 say "                    wl-clipboard grim slurp swaylock brightnessctl wlsunset"
 say "  3. Optional:  swaylock + the lock scripts need ~/.local/bin on \$PATH."
+if [ -x "$HOME/.local/share/wallfx/venv/bin/python" ]; then
+  say "  Wallpaper transition: ready — the two keys and the browser play the outline."
+else
+  say "  Wallpaper transition: cut-out model missing (plain fades). Run: wallfx instalar"
+fi

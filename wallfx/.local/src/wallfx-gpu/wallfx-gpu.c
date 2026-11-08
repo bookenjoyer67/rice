@@ -1,11 +1,29 @@
 /* wallfx-gpu — the character-draw wallpaper transition, drawn over awww.
  *
- * One fullscreen wlr-layer-shell surface per output, on the Bottom layer above
- * awww and below the windows, click-through. It draws the OUTLINE transition
- * only: a thin quiet line in the wallpaper's lightest tone draws the
- * character's silhouette (two pens from the top), the character fills in from
- * that outline, and then the rest of the world spreads out of it in crisp
- * 4 px cells.
+ * Two wlr-layer-shell surfaces per output, both click-through, because the
+ * cava bars sit between where the two halves have to go:
+ *   stage     (BACKGROUND layer)  the wallpaper crossfade, the outline and the
+ *                                 world spreading out — below the bars, so the
+ *                                 bars keep showing over the changing wallpaper
+ *   character (OVERLAY layer)     only the pixels inside the silhouette plus
+ *                                 its outline — above every bar, which is what
+ *                                 "the character passes in front of the bars"
+ *                                 means; ordering inside a layer is not worth
+ *                                 betting on, a different layer is.
+ * TOP is above BOTTOM in niri, but a bar is allowed to raise itself to TOP or
+ * OVERLAY; OVERLAY is the only layer that is above all of them. If the bars
+ * share it, this surface was created last so it still stacks above them.
+ * Because it is on OVERLAY it also covers whatever window sits under the
+ * silhouette, for the ~1.5 s the character is drawn. That is the price of the
+ * character being in front of layer-shell decorations at all: there is no slot
+ * between the bottom layer and the windows.
+ * Without that split, one fullscreen bottom-layer surface hides the bars for
+ * the whole transition.
+ *
+ * The stage draws the OUTLINE transition only: a thin quiet line in the
+ * wallpaper's lightest tone draws the character's silhouette (two pens from
+ * the top), the character fills in from that outline, and then the rest of the
+ * world spreads out of it in crisp 4 px cells.
  *
  * The maps come from `wallfx perfil IMG` (~/.cache/wallfx/perfil):
  *   campo : R = distance outside the silhouette (wide, for the glow)
@@ -39,18 +57,12 @@
 #include <signal.h>
 #include <time.h>
 #include <math.h>
-#include <limits.h>
-#include <sys/stat.h>
 #include <sys/types.h>
 #include <sys/wait.h>
 
-#include <wayland-client.h>
-#include <wayland-egl.h>
-#include "wlr-layer-shell-unstable-v1-client-protocol.h"
+#include "wlgl.h"
 
-#include <EGL/egl.h>
 #include <EGL/eglext.h>
-#include <GLES3/gl3.h>
 
 #define IMG_MAX 2560          /* longest side an image is decoded at          */
 
@@ -75,38 +87,36 @@ static double now_ms(void)
 
 /* ---------------------------------------------------------------- wayland */
 
-static struct wl_display *wl_dpy;
-static struct wl_registry *wl_reg;
-static struct wl_compositor *wl_comp;
-static struct zwlr_layer_shell_v1 *wl_shell;
-
-static EGLDisplay egl_dpy;
-static EGLContext egl_ctx;
-static EGLConfig  egl_cfg;
+static struct wlgl g;
 
 static GLuint prog, vao;
 static GLuint tex_campo, tex_linea;
 static int    maps_w, maps_h;
-static GLint  u_old, u_new, u_campo, u_linea, u_t, u_sw, u_sh, u_fw, u_fh,
-              u_lw, u_lh, u_lineW, u_sdRange, u_cropOld, u_cropNew, u_ink, u_fade;
+static GLint  u_old, u_new, u_campo, u_linea, u_t, u_sw, u_sh, u_fw,
+              u_lw, u_lh, u_lineW, u_sdRange, u_cropOld, u_cropNew, u_ink, u_fade,
+              u_charOnly;
 
+/* Two surfaces per output, because the cava bars sit between them:
+ *   BACKGROUND layer : STAGE     the wallpaper crossfade, the outline and the
+ *                                world spreading out — BELOW the bars, so the
+ *                                bars stay visible over the changing wallpaper
+ *   OVERLAY layer    : CHARACTER only what is inside the silhouette, plus its
+ *                                outline — above every bar layer (TOP included),
+ *                                and above the windows
+ * With one fullscreen surface on BOTTOM the bars disappeared for the whole
+ * transition, which is not what the bars' owner wants to look at.
+ */
 struct output {
-    struct wl_output *wl;
-    char name[64];
-    int32_t x, y, w, h;
-    struct wl_surface *surf;
-    struct zwlr_layer_surface_v1 *ls;
-    struct wl_egl_window *win;
-    EGLSurface esurf;
-    struct wl_callback *frame_cb;
-    int configured;
+    struct wlgl_output base;        /* must stay first: the registry fills it */
+    struct wlgl_layer s[2];         /* 0 stage, 1 character */
     GLuint tex_old, tex_new;
     float crop_old[4], crop_new[4];
-    struct output *next;
 };
 
-static struct output *outputs;
-static int n_outputs, n_ready;
+static int n_ready;
+
+#define OUTPUTS ((struct output *)g.outputs)
+#define NEXT(o) ((struct output *)(o)->base.next)
 
 static float g_ink[3] = { 1.f, 1.f, 1.f };   /* the outline's line colour */
 static float g_fade = 0.f;                   /* surface opacity, 0..1      */
@@ -129,11 +139,12 @@ static const char *FS_SRC =
     "uniform sampler2D lineTex;    // linea\n"
     "uniform float t;              // 0..1, linear in time\n"
     "uniform float sw, sh;         // screen, px\n"
-    "uniform float fw, fh;         // field texels\n"
+    "uniform float fw;             // field texels\n"
     "uniform float lw, lh;         // line texels\n"
     "uniform float lineW;          // outline width, px\n"
     "uniform float sdRange;        // campo B spans +-sdRange map px\n"
     "uniform float fade;           // 0..1 surface opacity\n"
+    "uniform float charOnly;       // 1 on the character surface, 0 on the stage\n"
     "uniform vec3  ink;            // the wallpaper's lightest tone\n"
     "uniform vec4  cropOld;        // image uv = xy + screen uv * zw\n"
     "uniform vec4  cropNew;\n"
@@ -198,48 +209,22 @@ static const char *FS_SRC =
     "  float drawP = escena((t - 0.02) / 0.33);\n"
     "  float lp = texture(lineTex, newUv(uv, zCh)).r;\n"
     "  float lfade = 1.0 - escena((t - 0.45) / 0.25);\n"
+    "  float lineA = 0.0;\n"
     "  if (lp > 0.0 && lp <= drawP && lfade > 0.0) {\n"
     "    float d = abs(sdPx) - lineW * 0.5;\n"
     "    float core = clamp(0.5 - d / max(fwidth(sdPx), 1e-3), 0.0, 1.0);\n"
-    "    c = mix(c, ink, core * 0.75 * lfade);\n"
+    "    lineA = core * lfade;\n"
+    "    c = mix(c, ink, lineA * 0.75);\n"
     "  }\n"
-    "  fragColor = vec4(clamp(c, 0.0, 1.0), 1.0) * fade;\n"
+    "  // The character surface carries only the silhouette and its outline, so\n"
+    "  // everything around it (the cava bars, the windows) stays as it was.\n"
+    "  float a = charOnly > 0.5 ? clamp(max(inside, lineA), 0.0, 1.0) : 1.0;\n"
+    "  fragColor = vec4(clamp(c, 0.0, 1.0) * (fade * a), fade * a);\n"
     "}\n";
-
-static GLuint compile(GLenum type, const char *src)
-{
-    GLuint s = glCreateShader(type);
-    glShaderSource(s, 1, &src, NULL);
-    glCompileShader(s);
-    GLint ok = 0;
-    glGetShaderiv(s, GL_COMPILE_STATUS, &ok);
-    if (!ok) {
-        char buf[4096];
-        glGetShaderInfoLog(s, sizeof buf, NULL, buf);
-        fprintf(stderr, "wallfx-gpu: shader compile failed: %s\n", buf);
-        exit(1);
-    }
-    return s;
-}
 
 static void gpu_init(void)
 {
-    GLuint vs = compile(GL_VERTEX_SHADER, VS_SRC);
-    GLuint fs = compile(GL_FRAGMENT_SHADER, FS_SRC);
-    prog = glCreateProgram();
-    glAttachShader(prog, vs);
-    glAttachShader(prog, fs);
-    glLinkProgram(prog);
-    GLint ok = 0;
-    glGetProgramiv(prog, GL_LINK_STATUS, &ok);
-    if (!ok) {
-        char buf[4096];
-        glGetProgramInfoLog(prog, sizeof buf, NULL, buf);
-        fprintf(stderr, "wallfx-gpu: program link failed: %s\n", buf);
-        exit(1);
-    }
-    glDeleteShader(vs);
-    glDeleteShader(fs);
+    prog = wlgl_program(&g, VS_SRC, FS_SRC);
     glGenVertexArrays(1, &vao);
 
     u_old    = glGetUniformLocation(prog, "oldTex");
@@ -250,7 +235,6 @@ static void gpu_init(void)
     u_sw     = glGetUniformLocation(prog, "sw");
     u_sh     = glGetUniformLocation(prog, "sh");
     u_fw     = glGetUniformLocation(prog, "fw");
-    u_fh     = glGetUniformLocation(prog, "fh");
     u_lw     = glGetUniformLocation(prog, "lw");
     u_lh     = glGetUniformLocation(prog, "lh");
     u_lineW  = glGetUniformLocation(prog, "lineW");
@@ -259,86 +243,10 @@ static void gpu_init(void)
     u_cropNew= glGetUniformLocation(prog, "cropNew");
     u_ink    = glGetUniformLocation(prog, "ink");
     u_fade   = glGetUniformLocation(prog, "fade");
+    u_charOnly = glGetUniformLocation(prog, "charOnly");
 }
 
 /* ------------------------------------------------------------------ images */
-
-static int read_fd_all(int fd, unsigned char **out, size_t *outlen)
-{
-    size_t cap = 1 << 20, len = 0;
-    unsigned char *buf = malloc(cap);
-    if (!buf) return -1;
-    for (;;) {
-        if (len == cap) {
-            cap *= 2;
-            unsigned char *nb = realloc(buf, cap);
-            if (!nb) { free(buf); return -1; }
-            buf = nb;
-        }
-        ssize_t n = read(fd, buf + len, cap - len);
-        if (n < 0) {
-            if (errno == EINTR) continue;
-            free(buf);
-            return -1;
-        }
-        if (n == 0) break;
-        len += (size_t)n;
-    }
-    *out = buf;
-    *outlen = len;
-    return 0;
-}
-
-/* magick <args...> to stdout; returns bytes read or -1 */
-static int magick_pipe(char *const argv[], unsigned char **out, size_t *outlen)
-{
-    int pf[2];
-    if (pipe(pf) != 0) return -1;
-    pid_t pid = fork();
-    if (pid == 0) {
-        dup2(pf[1], STDOUT_FILENO);
-        close(pf[0]); close(pf[1]);
-        int dn = open("/dev/null", O_WRONLY);
-        if (dn >= 0) dup2(dn, STDERR_FILENO);
-        execvp(argv[0], argv);
-        _exit(127);
-    }
-    close(pf[1]);
-    int rc = read_fd_all(pf[0], out, outlen);
-    close(pf[0]);
-    int status = 0;
-    waitpid(pid, &status, 0);
-    if (rc != 0 || !WIFEXITED(status) || WEXITSTATUS(status) != 0) {
-        if (*out) { free(*out); *out = NULL; }
-        *outlen = 0;
-        return -1;
-    }
-    return (int)*outlen;
-}
-
-static void image_dims(const char *path, int *w, int *h)
-{
-    *w = *h = 0;
-    int pf[2];
-    if (pipe(pf) != 0) return;
-    pid_t pid = fork();
-    if (pid == 0) {
-        dup2(pf[1], STDOUT_FILENO);
-        close(pf[0]); close(pf[1]);
-        int dn = open("/dev/null", O_WRONLY);
-        if (dn >= 0) dup2(dn, STDERR_FILENO);
-        execlp("magick", "magick", "identify", "-format", "%w %h", path, (char *)NULL);
-        _exit(127);
-    }
-    close(pf[1]);
-    char buf[64] = {0};
-    ssize_t n = read(pf[0], buf, sizeof buf - 1);
-    close(pf[0]);
-    int status = 0;
-    waitpid(pid, &status, 0);
-    if (n <= 0) return;
-    if (sscanf(buf, "%d %d", w, h) != 2) *w = *h = 0;
-}
 
 static GLuint upload_rgba(const unsigned char *buf, int w, int h)
 {
@@ -353,19 +261,20 @@ static GLuint upload_rgba(const unsigned char *buf, int w, int h)
     return tex;
 }
 
-/* decode an image (shrunk to IMG_MAX on the long side) into a new texture */
-static GLuint load_image(const char *path, int *ow, int *oh)
+static void ink_from_buffer(const unsigned char *buf, size_t len, float out[3]);
+
+/* decode an image (shrunk to IMG_MAX on the long side) into a new texture;
+ * when ink is non-NULL, also sample its lightest tone from the same bytes */
+static GLuint load_image(const char *path, int *ow, int *oh, float ink[3])
 {
     int iw = 0, ih = 0;
-    image_dims(path, &iw, &ih);
+    wlgl_image_dims(path, &iw, &ih);
     if (iw <= 0 || ih <= 0) return 0;
     char fit[64];
     snprintf(fit, sizeof fit, "%dx%d>", IMG_MAX, IMG_MAX);
-    char *av[] = { "magick", (char *)path, "-depth", "8", "-resize", fit,
-                   "rgba:-", NULL };
     unsigned char *buf = NULL;
     size_t len = 0;
-    if (magick_pipe(av, &buf, &len) < 0) return 0;
+    if (wlgl_magick_rgba(path, fit, &buf, &len) < 0) return 0;
     /* magick reports the size AFTER -resize only through the pixel count:
      * derive the decoded size from the ratio we asked for. */
     double s = 1.0;
@@ -378,6 +287,7 @@ static GLuint load_image(const char *path, int *ow, int *oh)
         free(buf);
         return 0;
     }
+    if (ink) ink_from_buffer(buf, len, ink);
     GLuint tex = upload_rgba(buf, dw, dh);
     free(buf);
     *ow = dw; *oh = dh;
@@ -403,10 +313,11 @@ static void load_maps(const char *campo, const char *linea)
     size_t clen = 0, llen = 0;
     char *cav[] = { "magick", (char *)campo, "-depth", "8", "rgba:-", NULL };
     char *lav[] = { "magick", (char *)linea, "-depth", "8", "rgba:-", NULL };
-    image_dims(campo, &cw, &ch);
-    image_dims(linea, &lw, &lh);
+    wlgl_image_dims(campo, &cw, &ch);
+    wlgl_image_dims(linea, &lw, &lh);
     if (cw <= 0 || ch <= 0 || lw <= 0 || lh <= 0) return;
-    if (magick_pipe(cav, &cbuf, &clen) < 0 || magick_pipe(lav, &lbuf, &llen) < 0) {
+    if (wlgl_magick_pipe(cav, &cbuf, &clen) < 0 ||
+        wlgl_magick_pipe(lav, &lbuf, &llen) < 0) {
         free(cbuf); free(lbuf);
         return;
     }
@@ -422,30 +333,33 @@ static void load_maps(const char *campo, const char *linea)
 
 /* ---------------------------------------------------------------- surfaces */
 
-static void render(struct output *o);
+static void render(struct wlgl_layer *s);
 static int  started;
 static double started_ms;
+static double g_duration_ms = 2000.0;
 
 static void frame_done(void *data, struct wl_callback *cb, uint32_t t)
 {
     (void)t;
-    struct output *o = data;
+    struct wlgl_layer *s = data;
     wl_callback_destroy(cb);
-    o->frame_cb = NULL;
+    s->frame_cb = NULL;
 }
 
 static const struct wl_callback_listener frame_cb_listener = { .done = frame_done };
 
-static void render(struct output *o)
+static void render(struct wlgl_layer *s)
 {
-    if (!o->configured || !o->esurf || o->frame_cb) return;
-    if (eglMakeCurrent(egl_dpy, o->esurf, o->esurf, egl_ctx) == EGL_FALSE) return;
+    struct output *o = (struct output *)s->output;
+    if (!s->configured || !s->esurf || s->frame_cb) return;
+    if (eglMakeCurrent(g.egl_dpy, s->esurf, s->esurf, g.egl_ctx) == EGL_FALSE) return;
 
-    int32_t w = o->w, h = o->h;
+    int32_t w = s->w, h = s->h;
     if (w <= 0 || h <= 0) return;
 
-    double t = started ? (now_ms() - started_ms) / 2000.0 : 0.0;
+    double t = started ? (now_ms() - started_ms) / g_duration_ms : 0.0;
     if (t > 1.0) t = 1.0;
+    float fade = g_fade;
 
     glViewport(0, 0, w, h);
     glDisable(GL_SCISSOR_TEST);
@@ -461,12 +375,12 @@ static void render(struct output *o)
     glUniform1f(u_sw, (float)w);
     glUniform1f(u_sh, (float)h);
     glUniform1f(u_fw, (float)maps_w);
-    glUniform1f(u_fh, (float)maps_h);
     glUniform1f(u_lw, (float)maps_w);
     glUniform1f(u_lh, (float)maps_h);
     glUniform1f(u_lineW, 1.5f);
     glUniform1f(u_sdRange, 16.0f);
-    glUniform1f(u_fade, g_fade);
+    glUniform1f(u_fade, fade);
+    glUniform1f(u_charOnly, s->kind == 1 ? 1.f : 0.f);
     glUniform3fv(u_ink, 1, g_ink);
     glUniform4fv(u_cropOld, 1, o->crop_old);
     glUniform4fv(u_cropNew, 1, o->crop_new);
@@ -482,249 +396,42 @@ static void render(struct output *o)
 
     glDrawArrays(GL_TRIANGLES, 0, 3);
 
-    o->frame_cb = wl_surface_frame(o->surf);
-    wl_callback_add_listener(o->frame_cb, &frame_cb_listener, o);
-    eglSwapBuffers(egl_dpy, o->esurf);
+    s->frame_cb = wl_surface_frame(s->surf);
+    wl_callback_add_listener(s->frame_cb, &frame_cb_listener, s);
+    eglSwapBuffers(g.egl_dpy, s->esurf);
 }
 
 static void render_all(void)
 {
-    for (struct output *o = outputs; o; o = o->next)
-        render(o);
-}
-
-static void ls_configure(void *data, struct zwlr_layer_surface_v1 *ls,
-                         uint32_t serial, uint32_t w, uint32_t h)
-{
-    struct output *o = data;
-    zwlr_layer_surface_v1_ack_configure(ls, serial);
-    if (w == 0 || h == 0) return;
-    if (!o->win) {
-        o->win = wl_egl_window_create(o->surf, (int)w, (int)h);
-        if (!o->win) return;
-        o->esurf = eglCreateWindowSurface(egl_dpy, egl_cfg, (EGLNativeWindowType)o->win, NULL);
-        if (o->esurf == EGL_NO_SURFACE) return;
-    } else {
-        wl_egl_window_resize(o->win, (int)w, (int)h, 0, 0);
+    for (struct output *o = OUTPUTS; o; o = NEXT(o)) {
+        render(&o->s[0]);
+        render(&o->s[1]);
     }
-    o->w = (int32_t)w;
-    o->h = (int32_t)h;
-    if (!o->configured) { o->configured = 1; n_ready++; }
-    logmsg("%s: %dx%d", o->name, o->w, o->h);
-    render(o);
 }
 
-static void ls_closed(void *data, struct zwlr_layer_surface_v1 *ls)
+static void layer_configured(struct wlgl_layer *l)
 {
-    (void)data; (void)ls;
+    struct output *o = (struct output *)l->output;
+    if (l->kind == 0 && !l->ready_counted) {
+        l->ready_counted = 1;
+        n_ready++;
+    }
+    logmsg("%s: %s %dx%d", o->base.name, l->kind ? "character" : "stage", l->w, l->h);
+    render(l);
+}
+
+static void layer_closed(struct wlgl_layer *l)
+{
+    (void)l;
     _exit(0);
 }
 
-static const struct zwlr_layer_surface_v1_listener ls_listener = {
-    .configure = ls_configure,
-    .closed = ls_closed,
+static const struct wlgl_layer_hooks layer_hooks = {
+    .configured = layer_configured,
+    .closed = layer_closed,
 };
-
-static void create_surface(struct output *o)
-{
-    o->surf = wl_compositor_create_surface(wl_comp);
-    if (!o->surf) return;
-    struct wl_region *empty = wl_compositor_create_region(wl_comp);
-    wl_surface_set_input_region(o->surf, empty);
-    wl_region_destroy(empty);
-
-    o->ls = zwlr_layer_shell_v1_get_layer_surface(wl_shell, o->surf, o->wl,
-                                                  ZWLR_LAYER_SHELL_V1_LAYER_BOTTOM,
-                                                  "wallfx-gpu");
-    zwlr_layer_surface_v1_set_anchor(o->ls, ZWLR_LAYER_SURFACE_V1_ANCHOR_TOP |
-                                             ZWLR_LAYER_SURFACE_V1_ANCHOR_BOTTOM |
-                                             ZWLR_LAYER_SURFACE_V1_ANCHOR_LEFT |
-                                             ZWLR_LAYER_SURFACE_V1_ANCHOR_RIGHT);
-    zwlr_layer_surface_v1_set_size(o->ls, o->w > 0 ? (uint32_t)o->w : 0,
-                                   o->h > 0 ? (uint32_t)o->h : 0);
-    /* -1: do not let another layer's exclusive zone (the Noctalia bar) shrink
-     * this surface — the transition has to cover the whole output. */
-    zwlr_layer_surface_v1_set_exclusive_zone(o->ls, -1);
-    zwlr_layer_surface_v1_set_keyboard_interactivity(o->ls, 0);
-    zwlr_layer_surface_v1_add_listener(o->ls, &ls_listener, o);
-    wl_surface_commit(o->surf);
-}
-
-/* ----------------------------------------------------------------- outputs */
-
-static void out_geometry(void *data, struct wl_output *wl, int32_t x, int32_t y,
-                         int32_t pw, int32_t ph, int32_t subpixel,
-                         const char *make, const char *model, int32_t transform)
-{
-    (void)wl; (void)pw; (void)ph; (void)subpixel; (void)make; (void)model; (void)transform;
-    struct output *o = data;
-    o->x = x; o->y = y;
-}
-
-static void out_mode(void *data, struct wl_output *wl, uint32_t flags,
-                     int32_t w, int32_t h, int32_t refresh)
-{
-    (void)wl; (void)flags; (void)refresh;
-    struct output *o = data;
-    if (w > 0 && h > 0) { o->w = w; o->h = h; }
-}
-
-static void out_done(void *data, struct wl_output *wl) { (void)data; (void)wl; }
-static void out_scale(void *data, struct wl_output *wl, int32_t f) { (void)data; (void)wl; (void)f; }
-static void out_name(void *data, struct wl_output *wl, const char *name)
-{
-    (void)wl;
-    struct output *o = data;
-    snprintf(o->name, sizeof o->name, "%s", name);
-}
-static void out_desc(void *data, struct wl_output *wl, const char *d) { (void)data; (void)wl; (void)d; }
-
-static const struct wl_output_listener out_listener = {
-    .geometry = out_geometry, .mode = out_mode, .done = out_done,
-    .scale = out_scale, .name = out_name, .description = out_desc,
-};
-
-static void reg_global(void *data, struct wl_registry *reg, uint32_t name,
-                       const char *iface, uint32_t ver)
-{
-    (void)data;
-    if (strcmp(iface, wl_compositor_interface.name) == 0) {
-        wl_comp = wl_registry_bind(reg, name, &wl_compositor_interface, 4);
-    } else if (strcmp(iface, zwlr_layer_shell_v1_interface.name) == 0) {
-        wl_shell = wl_registry_bind(reg, name, &zwlr_layer_shell_v1_interface, 1);
-    } else if (strcmp(iface, wl_output_interface.name) == 0) {
-        uint32_t v = ver < 4 ? ver : 4;
-        struct output *o = calloc(1, sizeof *o);
-        o->wl = wl_registry_bind(reg, name, &wl_output_interface, v);
-        o->next = outputs;
-        outputs = o;
-        n_outputs++;
-        wl_output_add_listener(o->wl, &out_listener, o);
-    }
-}
-
-static void reg_remove(void *data, struct wl_registry *reg, uint32_t name)
-{ (void)data; (void)reg; (void)name; }
-
-static const struct wl_registry_listener reg_listener = { reg_global, reg_remove };
-
-/* -------------------------------------------------------------------- egl */
-
-static void egl_boot(void)
-{
-    egl_dpy = eglGetPlatformDisplay(EGL_PLATFORM_WAYLAND_KHR, wl_dpy, NULL);
-    if (egl_dpy == EGL_NO_DISPLAY) { fprintf(stderr, "wallfx-gpu: no EGL display\n"); exit(1); }
-    EGLint major = 0, minor = 0;
-    if (!eglInitialize(egl_dpy, &major, &minor)) { fprintf(stderr, "wallfx-gpu: eglInitialize failed\n"); exit(1); }
-    if (!eglBindAPI(EGL_OPENGL_ES_API)) { fprintf(stderr, "wallfx-gpu: eglBindAPI failed\n"); exit(1); }
-    const EGLint cfg_attr[] = {
-        EGL_SURFACE_TYPE, EGL_WINDOW_BIT | EGL_PBUFFER_BIT,
-        EGL_RENDERABLE_TYPE, EGL_OPENGL_ES3_BIT,
-        EGL_RED_SIZE, 8, EGL_GREEN_SIZE, 8, EGL_BLUE_SIZE, 8, EGL_ALPHA_SIZE, 8,
-        EGL_NONE,
-    };
-    EGLint n = 0;
-    if (!eglChooseConfig(egl_dpy, cfg_attr, &egl_cfg, 1, &n) || n < 1) {
-        fprintf(stderr, "wallfx-gpu: no matching EGL config\n");
-        exit(1);
-    }
-    const EGLint ctx_attr[] = { EGL_CONTEXT_CLIENT_VERSION, 3, EGL_NONE };
-    egl_ctx = eglCreateContext(egl_dpy, egl_cfg, EGL_NO_CONTEXT, ctx_attr);
-    if (egl_ctx == EGL_NO_CONTEXT) { fprintf(stderr, "wallfx-gpu: eglCreateContext failed\n"); exit(1); }
-    if (!eglMakeCurrent(egl_dpy, EGL_NO_SURFACE, EGL_NO_SURFACE, egl_ctx)) {
-        const EGLint pb[] = { EGL_WIDTH, 1, EGL_HEIGHT, 1, EGL_NONE };
-        EGLSurface tmp = eglCreatePbufferSurface(egl_dpy, egl_cfg, pb);
-        if (tmp == EGL_NO_SURFACE || !eglMakeCurrent(egl_dpy, tmp, tmp, egl_ctx)) {
-            fprintf(stderr, "wallfx-gpu: cannot make an EGL context current\n");
-            exit(1);
-        }
-    }
-}
 
 /* ------------------------------------------------------------------- main */
-
-/* Offscreen render of the effect at chosen instants, for verification without
- * a window on screen: WALLFX_GPU_SELFTEST=/tmp/dir wallfx-gpu OLD NEW C L */
-static void selftest(const char *dir, const char *oldimg, const char *newimg,
-                     int w, int h)
-{
-    int ow = 0, oh = 0, nw = 0, nh = 0;
-    GLuint otex = load_image(oldimg, &ow, &oh);
-    GLuint ntex = load_image(newimg, &nw, &nh);
-    if (!otex || !ntex || !tex_campo || !tex_linea) return;
-
-    const EGLint pb[] = { EGL_WIDTH, w, EGL_HEIGHT, h, EGL_NONE };
-    EGLSurface surf = eglCreatePbufferSurface(egl_dpy, egl_cfg, pb);
-    if (surf == EGL_NO_SURFACE || !eglMakeCurrent(egl_dpy, surf, surf, egl_ctx)) return;
-    glViewport(0, 0, w, h);
-    if (cfg_verbose) {
-        EGLint ew = 0, eh = 0;
-        GLint vp[4] = { 0 };
-        eglQuerySurface(egl_dpy, surf, EGL_WIDTH, &ew);
-        eglQuerySurface(egl_dpy, surf, EGL_HEIGHT, &eh);
-        glGetIntegerv(GL_VIEWPORT, vp);
-        logmsg("selftest: pbuffer=%dx%d viewport=%d,%d %dx%d", ew, eh, vp[0], vp[1], vp[2], vp[3]);
-    }
-
-    float co[4], cn[4];
-    crop_for(ow, oh, w, h, co);
-    crop_for(nw, nh, w, h, cn);
-    if (cfg_verbose)
-        logmsg("selftest: old=%dx%d crop=[%g %g %g %g]  new=%dx%d crop=[%g %g %g %g]",
-               ow, oh, co[0], co[1], co[2], co[3], nw, nh, cn[0], cn[1], cn[2], cn[3]);
-
-    const double ts[] = { 0.02, 0.15, 0.33, 0.45, 0.62, 0.85, 1.0 };
-    unsigned char *px = malloc((size_t)w * h * 4);
-    for (int i = 0; i < (int)(sizeof ts / sizeof ts[0]) && px; i++) {
-        glClearColor(0, 0, 0, 0);
-        glClear(GL_COLOR_BUFFER_BIT);
-        glEnable(GL_BLEND);
-        glBlendFunc(GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
-        glUseProgram(prog);
-        glBindVertexArray(vao);
-        glUniform1f(u_t, (float)ts[i]);
-        glUniform1f(u_sw, (float)w);
-        glUniform1f(u_sh, (float)h);
-        glUniform1f(u_fw, (float)maps_w);
-        glUniform1f(u_fh, (float)maps_h);
-        glUniform1f(u_lw, (float)maps_w);
-        glUniform1f(u_lh, (float)maps_h);
-        glUniform1f(u_lineW, 1.5f);
-        glUniform1f(u_sdRange, 16.0f);
-        glUniform1f(u_fade, 1.0f);
-        glUniform3fv(u_ink, 1, g_ink);
-        glUniform4fv(u_cropOld, 1, co);
-        glUniform4fv(u_cropNew, 1, cn);
-        glActiveTexture(GL_TEXTURE0); glBindTexture(GL_TEXTURE_2D, otex); glUniform1i(u_old, 0);
-        glActiveTexture(GL_TEXTURE1); glBindTexture(GL_TEXTURE_2D, ntex); glUniform1i(u_new, 1);
-        glActiveTexture(GL_TEXTURE2); glBindTexture(GL_TEXTURE_2D, tex_campo); glUniform1i(u_campo, 2);
-        glActiveTexture(GL_TEXTURE3); glBindTexture(GL_TEXTURE_2D, tex_linea); glUniform1i(u_linea, 3);
-        glDrawArrays(GL_TRIANGLES, 0, 3);
-        glFinish();
-        glReadPixels(0, 0, w, h, GL_RGBA, GL_UNSIGNED_BYTE, px);
-        char path[PATH_MAX];
-        snprintf(path, sizeof path, "%s/t-%02d.ppm", dir, (int)(ts[i] * 100));
-        FILE *f = fopen(path, "wb");
-        if (!f) continue;
-        fprintf(f, "P6\n%d %d\n255\n", w, h);
-        /* glReadPixels is bottom-up; PPM is top-down. Copy channel by channel
-         * (a strided fwrite of the RGBA buffer as RGB silently interleaves). */
-        unsigned char *rowbuf = malloc((size_t)w * 3);
-        for (int y = h - 1; y >= 0 && rowbuf; y--) {
-            const unsigned char *src = px + (size_t)y * w * 4;
-            for (int x = 0; x < w; x++) {
-                rowbuf[x * 3 + 0] = src[x * 4 + 0];
-                rowbuf[x * 3 + 1] = src[x * 4 + 1];
-                rowbuf[x * 3 + 2] = src[x * 4 + 2];
-            }
-            fwrite(rowbuf, 1, (size_t)w * 3, f);
-        }
-        free(rowbuf);
-        fclose(f);
-        logmsg("selftest frame t=%.2f -> %s", ts[i], path);
-    }
-    free(px);
-}
 
 static void fallback(const char *newimg)
 {
@@ -759,14 +466,11 @@ static void ink_from_buffer(const unsigned char *buf, size_t len, float out[3])
     /* coarse scan: every 997th pixel is plenty for a tone */
     unsigned best = 0;
     double br = 1, bg = 1, bb = 1;
-    int seen = 0;
     for (size_t i = 0; i + 3 < len; i += 4 * 997) {
         unsigned r = buf[i], g = buf[i + 1], b = buf[i + 2];
         unsigned l = (unsigned)(0.299 * r + 0.587 * g + 0.114 * b);
         if (l > best) { best = l; br = r; bg = g; bb = b; }
-        seen++;
     }
-    (void)seen;
     if (best < 150) {           /* too dark to read on: lift towards white */
         br = br + (255 - br) * 0.7;
         bg = bg + (255 - bg) * 0.7;
@@ -775,6 +479,14 @@ static void ink_from_buffer(const unsigned char *buf, size_t len, float out[3])
     out[0] = (float)(br / 255.0);
     out[1] = (float)(bg / 255.0);
     out[2] = (float)(bb / 255.0);
+}
+
+/* Every way out that is not the effect says why: a silent fallback and a
+ * played transition look identical from the outside. */
+static void fail(const char *newimg, const char *why)
+{
+    fprintf(stderr, "wallfx-gpu: %s — plain fade\n", why);
+    fallback(newimg);
 }
 
 int main(int argc, char **argv)
@@ -786,99 +498,77 @@ int main(int argc, char **argv)
     }
     const char *oldimg = argv[1], *newimg = argv[2];
     const char *campo = argv[3], *linea = argv[4];
+    if (argc >= 6) {
+        char *end = NULL;
+        double d = strtod(argv[5], &end);
+        if (end && *end == '\0' && d > 0) g_duration_ms = d;
+    }
 
     signal(SIGPIPE, SIG_IGN);
 
-    wl_dpy = wl_display_connect(NULL);
-    if (!wl_dpy) { fallback(newimg); return 1; }
-    wl_reg = wl_display_get_registry(wl_dpy);
-    wl_registry_add_listener(wl_reg, &reg_listener, NULL);
-    wl_display_roundtrip(wl_dpy);
-    wl_display_roundtrip(wl_dpy);
-    if (!wl_comp || !wl_shell || !outputs) { fallback(newimg); return 1; }
+    wlgl_init(&g, "wallfx-gpu", logmsg);
+    g.output_size = sizeof(struct output);
+    int wl_rc = wlgl_connect(&g);
+    if (wl_rc == -1) { fail(newimg, "cannot connect to WAYLAND_DISPLAY"); return 1; }
+    if (wl_rc != 0 || !g.outputs) { fail(newimg, "compositor lacks wl_compositor/zwlr_layer_shell_v1 or has no output"); return 1; }
 
-    egl_boot();
+    wlgl_egl_boot(&g);
     gpu_init();
 
     int old_w = 0, old_h = 0, new_w = 0, new_h = 0;
-    GLuint old_tex = load_image(oldimg, &old_w, &old_h);
-    int new_iw = 0, new_ih = 0;
-    GLuint new_tex = 0;
-    {
-        /* keep the decoded new-image bytes for the ink tone */
-        image_dims(newimg, &new_iw, &new_ih);
-        if (new_iw > 0 && new_ih > 0) {
-            char fit[64];
-            snprintf(fit, sizeof fit, "%dx%d>", IMG_MAX, IMG_MAX);
-            char *av[] = { "magick", (char *)newimg, "-depth", "8", "-resize", fit,
-                           "rgba:-", NULL };
-            unsigned char *buf = NULL;
-            size_t len = 0;
-            if (magick_pipe(av, &buf, &len) > 0) {
-                double s = 1.0;
-                if (new_iw > IMG_MAX || new_ih > IMG_MAX)
-                    s = (new_iw >= new_ih) ? (double)IMG_MAX / new_iw : (double)IMG_MAX / new_ih;
-                int dw = (int)lround(new_iw * s), dh = (int)lround(new_ih * s);
-                if (dw > 0 && dh > 0 && len >= (size_t)dw * dh * 4) {
-                    new_tex = upload_rgba(buf, dw, dh);
-                    new_w = dw; new_h = dh;
-                    ink_from_buffer(buf, len, g_ink);
-                }
-                free(buf);
-            }
-        }
-    }
+    GLuint old_tex = load_image(oldimg, &old_w, &old_h, NULL);
+    GLuint new_tex = load_image(newimg, &new_w, &new_h, g_ink);
     load_maps(campo, linea);
     if (!old_tex || !new_tex || !tex_campo || !tex_linea) {
-        fallback(newimg);
+        fail(newimg, "could not decode the images or the maps");
         return 1;
     }
 
-    const char *st = getenv("WALLFX_GPU_SELFTEST");
-    if (st && *st) {
-        selftest(st, oldimg, newimg, 1280, 720);
-        return 0;
-    }
-
-    for (struct output *o = outputs; o; o = o->next) {
-        int ow = o->w > 0 ? o->w : 1920, oh = o->h > 0 ? o->h : 1080;
+    for (struct output *o = OUTPUTS; o; o = NEXT(o)) {
+        int ow = o->base.w > 0 ? o->base.w : 1920;
+        int oh = o->base.h > 0 ? o->base.h : 1080;
         o->tex_old = old_tex;
         o->tex_new = new_tex;
         crop_for(old_w, old_h, ow, oh, o->crop_old);
         crop_for(new_w, new_h, ow, oh, o->crop_new);
-        create_surface(o);
+        uint32_t lw = o->base.w > 0 ? (uint32_t)o->base.w : 0;
+        uint32_t lh = o->base.h > 0 ? (uint32_t)o->base.h : 0;
+        wlgl_create_layer(&g, &o->base, &o->s[0], 0,
+                          ZWLR_LAYER_SHELL_V1_LAYER_BACKGROUND, "wallfx-gpu-stage",
+                          lw, lh, &layer_hooks, o);
+        wlgl_create_layer(&g, &o->base, &o->s[1], 1,
+                          ZWLR_LAYER_SHELL_V1_LAYER_OVERLAY, "wallfx-gpu",
+                          lw, lh, &layer_hooks, o);
     }
-    wl_display_roundtrip(wl_dpy);
+    wl_display_roundtrip(g.dpy);
 
     /* watchdog: if the surfaces do not come up, the wallpaper still changes */
     double boot = now_ms();
-    while (n_ready < n_outputs && now_ms() - boot < 2500) {
-        wl_display_dispatch_pending(wl_dpy);
-        struct pollfd pf = { .fd = wl_display_get_fd(wl_dpy), .events = POLLIN };
-        if (poll(&pf, 1, 20) > 0) wl_display_dispatch(wl_dpy);
+    while (n_ready < g.n_outputs && now_ms() - boot < 2500) {
+        wl_display_dispatch_pending(g.dpy);
+        struct pollfd pf = { .fd = wl_display_get_fd(g.dpy), .events = POLLIN };
+        if (poll(&pf, 1, 20) > 0) wl_display_dispatch(g.dpy);
     }
-    if (n_ready == 0) { fallback(newimg); return 1; }
+    if (n_ready == 0) { fail(newimg, "no layer surface was configured in 2.5 s"); return 1; }
 
     started = 1;
     started_ms = now_ms();
     int swapped = 0;
-    double last = started_ms;
 
     for (;;) {
-        double now = now_ms();
-        double el = now - started_ms;
+        double el = now_ms() - started_ms;
 
         if (!swapped && el >= 130) {
             swap_awww(newimg);
             swapped = 1;
         }
-        double t = el / 2000.0;
+        double t = el / g_duration_ms;
         if (t > 1.0) t = 1.0;
         double fade;
         if (el < 130) fade = el / 130.0;                 /* in: over identical old */
         else if (t < 1.0) fade = 1.0;
         else {
-            fade = 1.0 - (el - 2000.0) / 130.0;          /* out: over the new */
+            fade = 1.0 - (el - g_duration_ms) / 130.0;   /* out: over the new */
             if (fade <= 0.0) break;
         }
 
@@ -886,15 +576,12 @@ int main(int argc, char **argv)
         g_fade = (float)fade;
 
         render_all();
-        wl_display_flush(wl_dpy);
+        wl_display_flush(g.dpy);
 
-        struct pollfd pf = { .fd = wl_display_get_fd(wl_dpy), .events = POLLIN };
+        struct pollfd pf = { .fd = wl_display_get_fd(g.dpy), .events = POLLIN };
         int pr = poll(&pf, 1, 8);
-        if (pr > 0) wl_display_dispatch(wl_dpy);
-        else wl_display_dispatch_pending(wl_dpy);
-
-        if (now - last > 60000) break;
-        last = now;
+        if (pr > 0) wl_display_dispatch(g.dpy);
+        else wl_display_dispatch_pending(g.dpy);
     }
 
     if (swap_pid > 0) waitpid(swap_pid, NULL, 0);

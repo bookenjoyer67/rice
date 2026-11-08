@@ -49,6 +49,16 @@ layer-rule {
     place-within-backdrop true
 }
 
+layer-rule {
+    match namespace="^wallpaper-bars-gpu$"
+    place-within-backdrop true
+}
+
+layer-rule {
+    match namespace="^wallfx-character$"
+    place-within-backdrop true
+}
+
 layout {
     gaps 6
     center-focused-column "never"
@@ -133,6 +143,7 @@ spawn-at-startup "sh" "-c" "LD_PRELOAD=\"$HOME/.local/lib/noctalia-layer-swap.so
 spawn-at-startup "bash" "-c" "$HOME/.config/niri/scripts/start-wallpaper-one.sh"   // awww daemon + re-paint the CURRENT wallpaper at startup (no new image; rotation DISABLED, user switches manually)
 spawn-at-startup "bash" "-c" "$HOME/.config/niri/scripts/wallpaper-hotplug.sh"     // re-paint wallpaper on monitors that (re)connect after startup (e.g. the flapping HDMI TV)
 spawn-at-startup "bash" "-c" "exec $HOME/.local/bin/wallpaper-bars-gpu >>$HOME/.cache/wallpaper-bars-gpu.log 2>&1"
+spawn-at-startup "bash" "-c" "exec /home/computing/.local/bin/wallfx-character >>/home/computing/.cache/wallfx-character.log 2>&1"
 spawn-at-startup "wl-paste" "--type" "text" "--watch" "cliphist" "store"
 spawn-at-startup "wl-paste" "--type" "image" "--watch" "cliphist" "store"
 spawn-at-startup "wlsunset" "-l" "38.6" "-L" "-90.2" "-T" "6500" "-t" "4000"
@@ -147,10 +158,6 @@ window-rule {
 }
 window-rule {
     match app-id="^org.waytray.Client$"
-    open-floating true
-}
-window-rule {
-    match app-id="^nm-connection-editor$"
     open-floating true
 }
 window-rule {
@@ -248,10 +255,11 @@ window-rule {
 }
 
 binds {
-    Mod+Return { spawn "kitty"; }                          // terminal (SUPER+Enter)
+    Mod+Return { spawn-sh "bash ~/.config/niri/scripts/spawn-terminal.sh"; }  // terminal (SUPER+Enter) — smaller font when it lands on the TV
     Mod+SPACE { spawn-sh "noctalia msg panel-toggle launcher"; }   // app launcher (Noctalia)
     Mod+E { spawn "nautilus"; }                            // file manager
     Mod+Shift+S { spawn-sh "bash ~/.config/niri/scripts/search-selection.sh"; }  // search highlighted text
+    Mod+Shift+D { spawn-sh "bash ~/bash-scripts/define/define.sh"; }
 
     Mod+Q { close-window; }
     Mod+F { fullscreen-window; }
@@ -328,9 +336,9 @@ binds {
 
     Mod+Shift+Slash { show-hotkey-overlay; }
 
-    XF86AudioRaiseVolume allow-when-locked=true { spawn-sh "wpctl set-volume -l 1 @DEFAULT_AUDIO_SINK@ 5%+"; }
-    XF86AudioLowerVolume allow-when-locked=true { spawn-sh "wpctl set-volume @DEFAULT_AUDIO_SINK@ 5%-"; }
-    XF86AudioMute allow-when-locked=true { spawn-sh "wpctl set-mute @DEFAULT_AUDIO_SINK@ toggle"; }
+    XF86AudioRaiseVolume allow-when-locked=true { spawn-sh "$HOME/.local/bin/volume-control.sh up 5"; }
+    XF86AudioLowerVolume allow-when-locked=true { spawn-sh "$HOME/.local/bin/volume-control.sh down 5"; }
+    XF86AudioMute allow-when-locked=true { spawn-sh "$HOME/.local/bin/volume-control.sh mute"; }
     XF86AudioMicMute allow-when-locked=true { spawn-sh "wpctl set-mute @DEFAULT_AUDIO_SOURCE@ toggle"; }
     XF86MonBrightnessUp allow-when-locked=true { spawn-sh "brightnessctl set 5%+"; }
     XF86MonBrightnessDown allow-when-locked=true { spawn-sh "brightnessctl set 5%-"; }

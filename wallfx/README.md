@@ -21,13 +21,33 @@ colonies. A wallpaper with no character just gets the plain awww fade.
 
 `~/.config/niri/scripts/apply-wallpaper.sh` is still the only place that paints.
 It asks `wallfx elige NEW` which transition the new image gets, and then hands
-the change to `wallfx-gpu OLD NEW CAMPO LINEA`, which:
+the change to `wallfx-gpu OLD NEW CAMPO LINEA [DURATION_MS]` (default 2000),
+which:
 
 1. fades in over awww (at t=0 the animation IS the old wallpaper, so the
    hand-over is invisible);
 2. switches awww underneath with `--transition-type none` once fully covered;
 3. finishes the animation on the new image, which awww now shows too;
 4. fades out and exits.
+
+It uses two surfaces per output, because the cava bars sit between where the
+two halves of the effect have to go:
+
+    background layer   STAGE      the wallpaper crossfade, the outline and the
+                                  world spreading out — BELOW the bars, so the
+                                  bars stay visible over the changing wallpaper
+    overlay layer      CHARACTER  only what is inside the silhouette, plus its
+                                  outline — above every bar layer, whether the
+                                  bar raised itself to TOP or OVERLAY, so it
+                                  passes in front of the cava bars. Being on
+                                  OVERLAY also means it covers the window under
+                                  the silhouette for the ~1.5 s it is drawn;
+                                  there is no layer between the bars and the
+                                  windows to put it in.
+
+One fullscreen surface on one layer would hide the bars for the whole
+transition (or sit behind them); this way the character draws over them and
+nothing else moves.
 
 If anything fails it runs a plain `awww img NEW --transition-type fade` itself:
 the wallpaper must change even if the effect cannot play.
@@ -65,9 +85,8 @@ the CPU. Delete that file to retry the GPU. Steady state on the CPU here:
 - Wallpaper browser: the apply status line says it is preparing and cutting
   out the character; a cached wallpaper still applies immediately.
 
-## Testing without a screen
+## Debugging
 
-    WALLFX_GPU_SELFTEST=/tmp/dir wallfx-gpu OLD NEW CAMPO LINEA
-
-renders the transition at seven instants into `t-*.ppm` (1280x720) and exits.
-It needs no awww and no window. `WALLFX_GPU_DEBUG=1` logs to stderr.
+`WALLFX_GPU_DEBUG=1` makes the renderer log to stderr, and every fallback says
+why it happened. `WALLPAPER_DEBUG=1` in apply-wallpaper.sh keeps those errors
+visible instead of sending them to /dev/null.

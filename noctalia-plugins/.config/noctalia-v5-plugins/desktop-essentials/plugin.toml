@@ -5,7 +5,7 @@ plugin_api = 26
 author = "computing"
 license = "MIT"
 icon = "layout-dashboard"
-description = "Desktop clock, one-line weather and DeepSeek peak/price countdown (replaces the eww desktop widgets)."
+description = "Desktop clock, one-line weather, DeepSeek peak/price countdown and per-core CPU monitor (replaces the eww desktop widgets)."
 tags = ["desktop", "clock", "weather", "utilities"]
 
 [[desktop_widget]]
@@ -19,3 +19,7 @@ entry = "weather.luau"
 [[desktop_widget]]
 id = "deepseek"
 entry = "deepseek.luau"
+
+[[desktop_widget]]
+id = "cpu-tv"
+entry = "cpu.luau"

@@ -15,7 +15,7 @@ if command -v jq >/dev/null 2>&1; then
 else
     enc="$(printf '%s' "$q" | python3 -c 'import sys,urllib.parse; print(urllib.parse.quote(sys.stdin.read()))')"
 fi
-url="https://search.brave.com/search?q=$enc"
+url="https://duckduckgo.com/?q=$enc"
 
 comp="unknown"
 if [ -n "${NIRI_SOCKET:-}" ] && niri msg workspaces >/dev/null 2>&1; then
@@ -29,18 +29,44 @@ if [ "${SEARCH_DRY_RUN:-0}" = "1" ]; then
     exit 0
 fi
 
-if command -v brave >/dev/null 2>&1; then
-    launch=(brave --new-window "$url")
-else
-    launch=(xdg-open "$url")
+browser=()
+if command -v brave-origin >/dev/null 2>&1; then
+    browser=(brave-origin)
+elif [ -x "$HOME/.local/bin/brave-origin" ]; then
+    browser=("$HOME/.local/bin/brave-origin")
+elif [ -x /usr/bin/brave-origin ]; then
+    browser=(/usr/bin/brave-origin)
+fi
+
+if [ "${#browser[@]}" -eq 0 ]; then
+    xdg-open "$url" >/dev/null 2>&1 &
+    exit 0
 fi
 
 case "$comp" in
     niri)
+        existing="$(niri msg -j windows 2>/dev/null | jq -r '[.[] | select(.app_id == "brave-origin")] | sort_by([(.focus_timestamp.secs // 0), (.focus_timestamp.nanos // 0)]) | last | .id // empty' || true)"
+        if [ -n "$existing" ]; then
+            prev_focus="$(niri msg -j windows 2>/dev/null | jq -r '.[] | select(.is_focused) | .id' | head -1 || true)"
+            prev_ws="$(niri msg -j workspaces 2>/dev/null | jq -r '.[] | select(.is_focused) | .idx' | head -1 || true)"
+            "${browser[@]}" --new-tab "$url" >/dev/null 2>&1 &
+            for _ in 1 2 3 4 5; do
+                sleep 0.1
+                cur="$(niri msg -j windows 2>/dev/null | jq -r '.[] | select(.is_focused) | .id' | head -1 || true)"
+                [ "$cur" = "$prev_focus" ] && break
+                if [ -n "$prev_focus" ]; then
+                    niri msg action focus-window --id "$prev_focus" >/dev/null 2>&1 || true
+                elif [ -n "$prev_ws" ]; then
+                    niri msg action focus-workspace "$prev_ws" >/dev/null 2>&1 || true
+                fi
+            done
+            exit 0
+        fi
+
         ws="$(niri msg -j workspaces 2>/dev/null | jq -r '.[] | select(.is_focused) | .id' | head -1 || true)"
         [ -z "$ws" ] && ws=1
         before="$(niri msg -j windows 2>/dev/null | jq -r '[.[].id] | @tsv' || true)"
-        "${launch[@]}" >/dev/null 2>&1 &
+        "${browser[@]}" --new-window "$url" >/dev/null 2>&1 &
         new=""
         for _ in $(seq 1 34); do
             after="$(niri msg -j windows 2>/dev/null | jq -r '[.[].id] | @tsv' || true)"
@@ -59,11 +85,24 @@ case "$comp" in
         fi
         ;;
     hyprland)
+        existing="$(hyprctl clients -j 2>/dev/null | jq -r '[.[] | select((.class // "") | test("brave-origin"; "i"))] | .[0].address // empty' 2>/dev/null || true)"
+        if [ -n "$existing" ]; then
+            prev_focus="$(hyprctl activewindow -j 2>/dev/null | jq -r '.address // empty' 2>/dev/null || true)"
+            "${browser[@]}" --new-tab "$url" >/dev/null 2>&1 &
+            for _ in 1 2 3 4 5; do
+                sleep 0.1
+                cur="$(hyprctl activewindow -j 2>/dev/null | jq -r '.address // empty' 2>/dev/null || true)"
+                [ "$cur" = "$prev_focus" ] && break
+                [ -n "$prev_focus" ] && hyprctl dispatch focuswindow "address:$prev_focus" >/dev/null 2>&1 || true
+            done
+            exit 0
+        fi
+
         ws="$(hyprctl activeworkspace -j 2>/dev/null | jq -r '.id' 2>/dev/null || true)"
         [ -z "$ws" ] || [ "$ws" = "null" ] && ws="$(hyprctl activeworkspace 2>/dev/null | sed -nE 's/.*workspace ID ([0-9]+).*/\1/p' || true)"
         [ -z "$ws" ] || [ "$ws" = "null" ] && ws=1
         before="$(hyprctl clients -j 2>/dev/null | jq -r '[.[].address] | @tsv' || true)"
-        "${launch[@]}" >/dev/null 2>&1 &
+        "${browser[@]}" --new-window "$url" >/dev/null 2>&1 &
         new=""
         for _ in $(seq 1 34); do
             after="$(hyprctl clients -j 2>/dev/null | jq -r '[.[].address] | @tsv' || true)"
@@ -82,6 +121,6 @@ case "$comp" in
         fi
         ;;
     *)
-        "${launch[@]}" >/dev/null 2>&1 &
+        "${browser[@]}" "$url" >/dev/null 2>&1 &
         ;;
 esac
