@@ -1,19 +1,19 @@
 return {
-  base00 = "#141318",             -- background
-  base01 = "#1c1b20",
-  base02 = "#201f25",   -- cursorline / selection
-  base03 = "#938f99",             -- dim accents (line numbers, delimiters)
-  base04 = "#c9c4d0",  -- secondary text
-  base05 = "#e6e1e9",          -- primary text
-  base06 = "#e6e1e9",
-  base07 = "#e6e1e9",
+  base00 = "#191113",             -- background
+  base01 = "#22191b",
+  base02 = "#261d1f",   -- cursorline / selection
+  base03 = "#9f8c8f",             -- dim accents (line numbers, delimiters)
+  base04 = "#d6c2c4",  -- secondary text
+  base05 = "#efdee0",          -- primary text
+  base06 = "#efdee0",
+  base07 = "#efdee0",
   base08 = "#ffb4ab",
-  base09 = "#edb8cc",
-  base0A = "#c9c3dc",
-  base0B = "#edb8cc",
-  base0C = "#c9c3dc",
-  base0D = "#cabeff",
+  base09 = "#ecbe90",
+  base0A = "#e4bdc3",
+  base0B = "#ecbe90",
+  base0C = "#e4bdc3",
+  base0D = "#ffb1c0",
   base0E = "#ffb4ab",
-  base0F = "#c9c3dc",
-  comment = "#c9c4d0", -- legible comment colour
+  base0F = "#e4bdc3",
+  comment = "#d6c2c4", -- legible comment colour
 }

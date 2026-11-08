@@ -5,7 +5,7 @@
 -- inside M.setup() -- not in a one-shot startup hook.
 function M.setup()
   require('base16-colorscheme').setup({
-    base00 = '#291415',
+    base00 = '#291414',
     base01 = '#452122',
     base02 = '#3e1e1f',
     base03 = '#716261',
@@ -13,14 +13,14 @@ function M.setup()
     base05 = '#f3f2f2',
     base06 = '#f3f2f2',
     base07 = '#f3f2f2',
-    base08 = '#e45e62',
-    base09 = '#e4e05e',
-    base0A = '#e49d5e',
-    base0B = '#e5666a',
-    base0C = '#edea92',
-    base0D = '#ec9295',
-    base0E = '#edbd92',
-    base0F = '#f4d7bd',
+    base08 = '#f73136',
+    base09 = '#f7f33b',
+    base0A = '#f7943b',
+    base0B = '#f85357',
+    base0C = '#faf884',
+    base0D = '#fa8487',
+    base0E = '#fabc84',
+    base0F = '#fcd7b6',
   })
 
   local hi = function(group, opts)
@@ -68,24 +68,24 @@ function M.setup()
   hi('TelescopeBorder',         { fg = '#716261' })
   hi('TelescopePromptNormal',   { fg = '#f3f2f2' })
   hi('TelescopePromptBorder',   { fg = '#716261' })
-  hi('TelescopePromptPrefix',   { fg = '#e5666a' })
+  hi('TelescopePromptPrefix',   { fg = '#f85357' })
   hi('TelescopePromptCounter',  { fg = '#b6afaf' })
-  hi('TelescopePromptTitle',    { fg = '#291415',             bg = '#e5666a' })
-  hi('TelescopePreviewTitle',   { fg = '#291415',             bg = '#e49d5e' })
-  hi('TelescopeResultsTitle',   { fg = '#291415',             bg = '#e4e05e' })
+  hi('TelescopePromptTitle',    { fg = '#291414',             bg = '#f85357' })
+  hi('TelescopePreviewTitle',   { fg = '#291414',             bg = '#f7943b' })
+  hi('TelescopeResultsTitle',   { fg = '#291414',             bg = '#f7f33b' })
   hi('TelescopeSelection',      { fg = '#f3f2f2',          bg = '#3e1e1f' })
-  hi('TelescopeSelectionCaret', { fg = '#e5666a',             bg = '#3e1e1f' })
-  hi('TelescopeMatching',       { fg = '#e5666a',             bold = true })
+  hi('TelescopeSelectionCaret', { fg = '#f85357',             bg = '#3e1e1f' })
+  hi('TelescopeMatching',       { fg = '#f85357',             bold = true })
 
   -- mini.pick
   hi('MiniPickNormal',         { fg = '#f3f2f2' })
   hi('MiniPickBorder',         { fg = '#716261' })
   hi('MiniPickPrompt',         { fg = '#f3f2f2' })
-  hi('MiniPickPromptPrefix',   { fg = '#e5666a' })
-  hi('MiniPickBorderText',     { fg = '#291415',             bg = '#e5666a' })
+  hi('MiniPickPromptPrefix',   { fg = '#f85357' })
+  hi('MiniPickBorderText',     { fg = '#291414',             bg = '#f85357' })
   hi('MiniPickMatchCurrent',   { fg = '#f3f2f2',          bg = '#3e1e1f' })
-  hi('MiniPickPromptCaret',    { fg = '#e5666a',             bg = '#3e1e1f' })
-  hi('MiniPickMatchRanges',    { fg = '#e5666a',             bold = true })
+  hi('MiniPickPromptCaret',    { fg = '#f85357',             bg = '#3e1e1f' })
+  hi('MiniPickMatchRanges',    { fg = '#f85357',             bold = true })
 
   -- Anything the previous colorscheme left behind (nvim-cmp / blink.cmp menus
   -- are not defined by base16-nvim, so their old opaque fills survive).
